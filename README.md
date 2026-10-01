@@ -1,10 +1,11 @@
-# milestone-wheel-tools
+# Gravel mod
 
-**Wheel setup and telemetry for Gravel, with research tools for other Milestone games.**
+**One Gravel package for wheel setup and optional telemetry.**
 
 The supported package makes modern direct-drive wheels selectable in Gravel,
 provides an external control-binding tool, and sends telemetry to compatible
-Forza receivers. Other Milestone titles remain unverified research candidates.
+Forza receivers. Shared Milestone research code and history are retained;
+motorcycle games are inactive and excluded from the active portfolio.
 
 | you want | run |
 |---|---|
@@ -102,9 +103,18 @@ it up with no integration work.
 Verified with a MOZA R12: working speedometer and tachometer in SimHub, with
 speed, RPM, gear, pedals, wheel slip and suspension travel all live.
 
-MXGP, MotoGP, Ride and Supercross are research candidates. Shared engine
-technology does not establish compatible input, reflection or telemetry hooks.
-The installer accepts Gravel only.
+MXGP, MotoGP, Ride and Supercross are inactive historical research targets.
+Their shared code and documentation remain available; this product supports
+Gravel only. Shared engine technology does not establish title compatibility.
+
+The MOZA R12 hardware evidence is dated August 30, 2026. The September 19
+0.2.0 deployment has installer and offline fixture evidence, with a drive and
+physical-force acceptance still pending on that package. Native FFB passes
+through unchanged. Normalized rig FFB, true triples and recorded gameplay
+acceptance are not established by this release.
+
+Repository naming may change during portfolio organization. Existing package,
+configuration, receipt and launcher names remain compatibility contracts.
 
 ## Install
 
