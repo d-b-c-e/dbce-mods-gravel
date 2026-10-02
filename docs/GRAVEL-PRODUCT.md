@@ -1,9 +1,10 @@
 # Gravel product contract
 
-Review draft based on upstream main `cb7a4526cd5f81b5457bf2551163b93c89bb7758`.
+The organization documentation was published in commit
+`d019d5a2468a1ee9c179b47bf5921e3eae0055c8`, based on main `cb7a4526`.
 The canonical repository is [d-b-c-e/dbce-mods-gravel](https://github.com/d-b-c-e/dbce-mods-gravel).
-The in-place rename is complete; this documentation draft has not been published
-and creates no product release.
+The in-place rename and documentation integration are complete. Neither created
+a product release. The installer ownership-safety follow-up is a review candidate.
 
 ## Repository and ownership
 
@@ -36,7 +37,7 @@ effect at the next launch. FFB and camera behavior remain game-owned.
 
 ## Compatibility and release identity
 
-Keep `VERSION` at 0.2.0 for this organization-only draft. Preserve the existing
+The reviewed organization change retained `VERSION` at 0.2.0. Preserve the existing
 `milestone-wheel-tools` package Product, ZIP naming, `package-manifest.json`,
 `milestone_mod.ini`, `milestone_mod.log`, `milestone_install.json`,
 `DBCE-Wheel-Setup`, `DBCE-Wheel-Backups` and launcher names. Repository display
@@ -69,13 +70,16 @@ in this source draft or its package.
 
 ## Review and subsequent organization step
 
-Review the two-file documentation diff against the pinned main. Then coordinate
-the owner, recheck main before documentation integration, and reconcile explicit
-repository links and consumer inventories to the canonical URL without changing
-installer identity. Retain inactive motorcycle history. Documentation publication
-and main integration remain pending independent review; do not repeat the rename.
+The two-file organization diff was independently reviewed and promoted to main
+at `d019d5a` without forcing. Retain inactive motorcycle history and legacy
+installer identity; do not repeat the rename. Review the ownership-safety candidate
+separately before any further source integration or package publication.
 
 Existing verification commands are `tools/tests/Test-SetupUx.ps1` and
 `tools/tests/Test-InstallPackage.ps1`; they use disposable/synthetic fixtures.
-They are not gameplay or physical force tests. This draft changes no executable
-behavior, so it introduces no new runtime or migration implementation.
+They are not gameplay or physical force tests. The ownership-safety candidate
+changes installer/removal checks, not the native runtime or toolkit pin. It
+validates complete prior receipt path/hash sets and recognizes only the exact
+known 0.1.0/0.2.0 proxy hashes without a receipt. Unknown/modified files block upgrades;
+removal keeps edited owned files. Ownership snapshots are rechecked by the
+transaction before writes; existing rollback and external-edit protections remain.

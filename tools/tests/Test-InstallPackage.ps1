@@ -32,6 +32,8 @@ function Reject([scriptblock]$Action, [string]$Message, [string]$Pattern) {
 function Entry([string]$Name, [string]$Text) { [pscustomobject]@{ Path=(Join-Path $fixture $Name); Bytes=[Text.Encoding]::UTF8.GetBytes($Text) } }
 function Get-Process { @() }
 try {
+    Assert (Test-KnownLegacyProxy 'a9940602daee99f3a7139b56230df2b4b6466be80e78b356e9cd93d8ecb531be') 'Verified v0.1.0 identity missing.'
+    Assert (-not (Test-KnownLegacyProxy ('a'*64))) 'Unknown legacy identity accepted.'
     Assert-PackageManifest $PackageRoot
     $manifestText = [IO.File]::ReadAllText($manifestPath)
     Remove-Item -LiteralPath $manifestPath
@@ -44,12 +46,14 @@ try {
         Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $fixture } "Modified payload was accepted: $relative" 'Package hash mismatch'
         [IO.File]::WriteAllBytes($path, $originalBytes)
     }
-    foreach ($change in 'duplicate','missing','unexpected','product','version') {
+    foreach ($change in 'duplicate','missing','unexpected','private-save','generated-game','product','version') {
         $bad = $manifestText | ConvertFrom-Json
         switch ($change) {
             'duplicate' { $bad.Files[1].Path = $bad.Files[0].Path }
             'missing' { $bad.Files = @($bad.Files | Select-Object -Skip 1) }
             'unexpected' { $bad.Files[0].Path = '../escape.txt' }
+            'private-save' { $bad.Files[0].Path = 'games/gravel/settings.sav' }
+            'generated-game' { $bad.Files[0].Path = 'games/gravel/generated-game.bin' }
             'product' { $bad.Product = 'other-product' }
             'version' { $bad.Version = '999' }
         }
@@ -57,6 +61,7 @@ try {
         Reject { Assert-PackageManifest $PackageRoot } "Invalid $change manifest was accepted."
     }
     [IO.File]::WriteAllText($manifestPath, $manifestText)
+    Assert (@(Get-PackageFiles | Where-Object { $_ -match '\.(sav|rom|bin|fzpt)$|milestone_mod\.log$|milestone_install\.json$' }).Count -eq 0) 'Private/generated game assets entered the package allowlist.'
     $old = Join-Path $fixture 'existing.ini'
     $empty = Join-Path $fixture 'empty.ini'
     [IO.File]::WriteAllText($old, 'owner data')
@@ -86,6 +91,17 @@ try {
     $concurrent = { $script:closedChecks++; if ($script:closedChecks -eq 2) { [IO.File]::WriteAllText($old, 'owner changed it') } }
     Reject { Invoke-PackageInstall $items $fixture (Join-Path $fixture 'concurrent') -BeforeWrite $concurrent } 'Concurrent edit was not detected.'
     Assert ([IO.File]::ReadAllText($old) -ceq 'owner changed it') 'Concurrent owner edit was overwritten.'
+    [IO.File]::WriteAllText($old, 'owner data')
+    $script:closedChecks = 0
+    $rollbackEdit = {
+        $script:closedChecks++
+        if ($script:closedChecks -eq 3) { [IO.File]::WriteAllText($old, 'external rollback edit'); throw 'fixture interrupted' }
+    }
+    Reject { Invoke-PackageInstall $items $fixture (Join-Path $fixture 'rollback-edit') -BeforeWrite $rollbackEdit } 'Install rollback overwrote an external edit.' 'Rollback needs attention'
+    Assert ([IO.File]::ReadAllText($old) -ceq 'external rollback edit') 'Rollback erased external bytes.'
+    $raceEntry = Entry 'existing.ini' 'replacement'
+    $raceEntry | Add-Member -NotePropertyName ExpectedHash -NotePropertyValue (Get-ByteHash ([Text.Encoding]::UTF8.GetBytes('owner data')))
+    Reject { Invoke-PackageInstall @($raceEntry) $fixture (Join-Path $fixture 'ownership-race') } 'Changed ownership snapshot accepted.' 'Ownership changed'
     [IO.File]::WriteAllText($old, 'owner data')
     $result = Invoke-PackageInstall $items $fixture (Join-Path $fixture 'success')
     Assert ($result.ChangedFiles -eq 3) 'Transaction did not install all files.'
@@ -118,13 +134,61 @@ try {
     Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game } 'An unrelated proxy was replaced.'
     Assert ([IO.File]::ReadAllText((Join-Path $game 'dinput8.dll')) -eq 'another proxy') 'Unrelated proxy bytes changed.'
     Assert (-not (Test-Path -LiteralPath (Join-Path $game 'DBCE-Wheel-Backups'))) 'Rejected install mutated backup state.'
+    [IO.File]::WriteAllText((Join-Path $game 'dinput8.dll'), 'spoof milestone_mod proxy')
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game } 'Marker spoof was installed.' 'Unknown installed file'
+    Reject { & (Join-Path $PackageRoot 'Uninstall.ps1') -GamePath $game } 'Marker spoof was removed.' 'Unknown receiptless'
+    Assert ([IO.File]::ReadAllText((Join-Path $game 'dinput8.dll')) -ceq 'spoof milestone_mod proxy') 'Marker spoof bytes changed.'
     Remove-Item -LiteralPath (Join-Path $game 'dinput8.dll')
+    $orphanSetup = Join-Path $game 'DBCE-Wheel-Setup\WheelSetup.ps1'
+    [IO.Directory]::CreateDirectory((Split-Path $orphanSetup -Parent)) | Out-Null
+    [IO.File]::WriteAllText($orphanSetup, 'unreceipted owner setup')
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game } 'Unreceipted setup was replaced.' 'Unknown installed file'
+    Assert ([IO.File]::ReadAllText($orphanSetup) -ceq 'unreceipted owner setup') 'Orphan setup changed.'
+    Remove-Item -LiteralPath $orphanSetup
+    [IO.File]::WriteAllText((Join-Path $gameRoot 'Wheel settings.bat'), 'REM DBCE Milestone wheel settings spoof')
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game } 'Launcher marker spoof was replaced.' 'Unknown installed file'
+    Remove-Item -LiteralPath (Join-Path $gameRoot 'Wheel settings.bat')
     & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game
     Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($ini))) -eq $iniHash) 'Update changed encoding or custom INI bytes.'
     Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($wheel))) -eq $wheelHash) 'Update changed existing wheel profile.'
     $receipt = [IO.File]::ReadAllText((Join-Path $game 'milestone_install.json')) | ConvertFrom-Json
     Assert ($receipt.GameRoot -eq $gameRoot) 'Canonical game layout was resolved incorrectly.'
     foreach ($item in $receipt.OwnedFiles) { Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($item.Path))) -eq $item.Hash) "Installed receipt mismatch: $($item.Path)" }
+    $receiptPath = Join-Path $game 'milestone_install.json'
+    $receiptBytes = [IO.File]::ReadAllBytes($receiptPath)
+    $setup = Join-Path $game 'DBCE-Wheel-Setup\WheelSetup.ps1'
+    $setupBytes = [IO.File]::ReadAllBytes($setup)
+    [IO.File]::AppendAllText($setup, 'owner edit')
+    $editedHash = Get-ByteHash ([IO.File]::ReadAllBytes($setup))
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game } 'Modified setup was overwritten.' 'Modified installed file'
+    Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($setup))) -ceq $editedHash) 'Edited setup changed on refusal.'
+    Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($receiptPath))) -ceq (Get-ByteHash $receiptBytes)) 'Refused update changed receipt.'
+    [IO.File]::WriteAllBytes($setup, $setupBytes)
+    foreach ($mutation in 'json','duplicate','missing','hash','game','version','path') {
+        $bad = [Text.Encoding]::UTF8.GetString($receiptBytes) | ConvertFrom-Json
+        switch ($mutation) {
+            'duplicate' { $bad.OwnedFiles[1] = $bad.OwnedFiles[0] }
+            'missing' { $bad.OwnedFiles = @($bad.OwnedFiles | Select-Object -Skip 1) }
+            'hash' { $bad.OwnedFiles[0].Hash = 'bad' }
+            'game' { $bad.Game = 'MXGP' }
+            'version' { $bad.Version = $null }
+            'path' { $bad.OwnedFiles[0].Path = Join-Path $fixture 'outside-owned.dll' }
+        }
+        $badText = if ($mutation -eq 'json') { '{broken' } else { $bad | ConvertTo-Json -Depth 6 }
+        [IO.File]::WriteAllText($receiptPath, $badText)
+        Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game } "Malformed $mutation receipt allowed upgrade."
+        Reject { & (Join-Path $PackageRoot 'Uninstall.ps1') -GamePath $game } "Malformed $mutation receipt allowed removal."
+        Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($setup))) -ceq (Get-ByteHash $setupBytes)) "Malformed $mutation receipt changed setup."
+    }
+    [IO.File]::WriteAllBytes($receiptPath, $receiptBytes)
+    # A synthetic older setup with a matching valid prior receipt can upgrade.
+    [IO.File]::WriteAllText($setup, 'synthetic prior owned setup')
+    $prior = [Text.Encoding]::UTF8.GetString($receiptBytes) | ConvertFrom-Json
+    ($prior.OwnedFiles | Where-Object Path -EQ $setup).Hash = Get-ByteHash ([IO.File]::ReadAllBytes($setup))
+    [IO.File]::WriteAllText($receiptPath, ($prior | ConvertTo-Json -Depth 6))
+    & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game
+    Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($setup))) -ceq (Get-ByteHash $setupBytes)) 'Valid prior-receipt upgrade did not restore new payload.'
+    $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
     $launcher = [IO.File]::ReadAllText((Join-Path $gameRoot 'Wheel settings.bat'))
     Assert ($launcher.Contains('-ModConfig') -and $launcher.Contains($ini)) 'Launcher omitted exact game configuration.'
     $lockedFile = Join-Path $game 'DBCE-Wheel-Setup\dist\wheelprobe.exe'
@@ -139,6 +203,30 @@ try {
     Assert ([IO.File]::ReadAllText($modified).EndsWith('owner note')) 'Uninstall deleted an edited setup file.'
     Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($ini))) -eq $iniHash) 'Uninstall changed owner INI.'
     Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($wheel))) -eq $wheelHash) 'Uninstall changed owner profile.'
+    $legacy = Join-Path $fixture 'legacy'
+    [IO.Directory]::CreateDirectory($legacy) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $legacy 'gravel-Win64-Shipping.exe'), 'inert')
+    Copy-Item -LiteralPath (Join-Path $PackageRoot 'dist\dinput8.dll') -Destination (Join-Path $legacy 'dinput8.dll')
+    & (Join-Path $PackageRoot 'Uninstall.ps1') -GamePath $legacy
+    Assert (-not (Test-Path -LiteralPath (Join-Path $legacy 'dinput8.dll'))) 'Known exact receiptless proxy was retained.'
+    Copy-Item -LiteralPath (Join-Path $PackageRoot 'dist\dinput8.dll') -Destination (Join-Path $legacy 'dinput8.dll')
+    & (Join-Path $PackageRoot 'Install.ps1') -GamePath $legacy -Product 0006346e -SkipWheelConfig
+    Assert (Test-Path -LiteralPath (Join-Path $legacy 'milestone_install.json')) 'Known receiptless upgrade did not create receipt.'
+    & (Join-Path $PackageRoot 'Uninstall.ps1') -GamePath $legacy
+    [IO.File]::WriteAllText((Join-Path $legacy 'dinput8.dll'), 'unknown milestone_mod')
+    [IO.File]::WriteAllText((Join-Path $legacy 'milestone_mod.log'), 'owner log')
+    Reject { & (Join-Path $PackageRoot 'Uninstall.ps1') -GamePath $legacy } 'Unknown receiptless removal accepted.' 'Unknown receiptless'
+    Assert ([IO.File]::ReadAllText((Join-Path $legacy 'milestone_mod.log')) -ceq 'owner log') 'Unknown proxy removal altered log.'
+    $removeA = Join-Path $fixture 'remove-a.txt'
+    $removeB = Join-Path $fixture 'remove-b.txt'
+    [IO.File]::WriteAllText($removeA, 'original a')
+    [IO.File]::WriteAllText($removeB, 'original b')
+    $removeItems = @($removeA,$removeB) | ForEach-Object { [pscustomobject]@{ Path=$_; Hash=(Get-ByteHash ([IO.File]::ReadAllBytes($_))) } }
+    $script:closedChecks = 0
+    $removalEdit = { $script:closedChecks++; if ($script:closedChecks -eq 3) { [IO.File]::WriteAllText($removeA, 'external replacement'); throw 'fixture interrupted' } }
+    Reject { Invoke-PackageRemoval $removeItems $fixture (Join-Path $fixture 'removal-edit') -BeforeWrite $removalEdit } 'Removal rollback accepted external replacement.' 'rollback needs attention'
+    Assert ([IO.File]::ReadAllText($removeA) -ceq 'external replacement') 'Removal rollback erased external replacement.'
+    Assert ([IO.File]::ReadAllText($removeB) -ceq 'original b') 'Removal failure changed later file.'
     $other = Join-Path $fixture 'UnsupportedGame'
     [IO.Directory]::CreateDirectory($other) | Out-Null
     Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $other -Product 0006346e } 'Unsupported game folder accepted.'

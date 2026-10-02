@@ -53,12 +53,7 @@ $checkClosed = {
 & $checkClosed
 
 $destDll = Join-Path $GamePath 'dinput8.dll'
-if (Test-Path -LiteralPath $destDll) {
-    $oldDll = [IO.File]::ReadAllBytes($destDll)
-    if ([Text.Encoding]::ASCII.GetString($oldDll).IndexOf('milestone_mod', [StringComparison]::Ordinal) -lt 0) {
-        Fail 'Another tool owns dinput8.dll here. It was left untouched; this package cannot replace that proxy.'
-    }
-}
+$ownership = Get-InstallOwnership $GamePath $gameRoot
 $destIni = Join-Path $GamePath 'milestone_mod.ini'
 $existing = if (Test-Path -LiteralPath $destIni) { [IO.File]::ReadAllText($destIni) } else { $null }
 $savedProduct = if ($null -ne $existing) { Get-ModSetting $existing 'proxy' 'product' } else { '' }
@@ -111,13 +106,15 @@ foreach ($relative in $setupFiles) {
 }
 $launcher = Join-Path $gameRoot 'Wheel settings.bat'
 $launchText = "@echo off`r`nREM DBCE Milestone wheel settings`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$setupRoot\WheelSetup.ps1`" -GamePath `"$inner`" -ModConfig `"$destIni`"`r`npause`r`n"
-if ((Test-Path -LiteralPath $launcher) -and ([IO.File]::ReadAllText($launcher) -notlike '*REM DBCE Milestone wheel settings*')) { Fail 'An unrelated Wheel settings.bat already exists. It was kept; rename it before installing.' }
 $launchBytes = [Text.UTF8Encoding]::new($false).GetBytes($launchText)
 $entries += [pscustomobject]@{ Path=$launcher; Bytes=$launchBytes }
 $owned += [pscustomobject]@{ Path=$launcher; Hash=(Get-ByteHash $launchBytes) }
 $version = ([IO.File]::ReadAllText((Join-Path $root 'VERSION'))).Trim()
 $receipt = [pscustomobject]@{ Product='milestone-wheel-tools'; Version=$version; Game='Gravel'; GameRoot=$gameRoot; InstalledUtc=[DateTime]::UtcNow.ToString('o'); OwnedFiles=$owned }
 $entries += [pscustomobject]@{ Path=(Join-Path $GamePath 'milestone_install.json'); Bytes=[Text.UTF8Encoding]::new($false).GetBytes(($receipt | ConvertTo-Json -Depth 6)) }
+foreach ($entry in $entries) {
+    if ($ownership.ContainsKey($entry.Path)) { $entry | Add-Member -NotePropertyName ExpectedHash -NotePropertyValue $ownership[$entry.Path] }
+}
 $backup = Join-Path $GamePath ('DBCE-Wheel-Backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,6))
 $result = Invoke-PackageInstall -Entries $entries -AllowedRoot $gameRoot -BackupRoot $backup -BeforeWrite $checkClosed
 Say "Installed $version. Backups: $($result.BackupRoot)"

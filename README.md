@@ -137,6 +137,15 @@ setup files and their hashes are listed in **milestone_install.json**.
 The complete package manifest is required and every payload hash is checked
 before discovery or changes. Source developers must package before installing.
 
+Updates verify existing proxy, setup and launcher files against a validated
+prior install receipt. Unknown or edited files stop the update without replacing
+them. A damaged receipt also stops installation/removal. Without a receipt, only
+the exact known 0.1.0/0.2.0 proxy hashes are recognized; marker text is not ownership.
+Receiptless setup or launcher files are retained and block installation.
+Uninstall keeps edited receipt-owned files and removes only matching files;
+unknown receiptless proxies are left untouched. Keep receipts and backups when
+moving an installation; resolve a refused update before retrying.
+
 Advanced installer switches (ordinary updates keep existing settings):
 
 ```powershell

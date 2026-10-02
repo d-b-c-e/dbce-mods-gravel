@@ -38,10 +38,14 @@ function Invoke-PackageInstall {
         if ($seen.ContainsKey($path)) { throw "Duplicate install target: $path" }
         $seen[$path] = $true
         $old = if ([IO.File]::Exists($path)) { ,([IO.File]::ReadAllBytes($path)) } else { $null }
+        $oldHash = if ($null -ne $old) { Get-ByteHash $old } else { $null }
+        if ($entry.PSObject.Properties['ExpectedHash'] -and $oldHash -ine $entry.ExpectedHash) {
+            throw "Ownership changed before install: $path"
+        }
         $data = [byte[]]$entry.Bytes
         $items += [pscustomobject]@{
             Path=$path; Bytes=$data; NewHash=(Get-ByteHash $data)
-            Original=$old; OriginalHash=$(if ($null -ne $old) { Get-ByteHash $old } else { $null })
+            Original=$old; OriginalHash=$oldHash
             Backup=$(if ($null -ne $old) { Join-Path $BackupRoot (('{0:D3}-' -f $items.Count) + [IO.Path]::GetFileName($path)) } else { $null })
         }
     }
@@ -146,6 +150,63 @@ function Get-SetupPackageFiles {
       'docs\troubleshooting.md','docs\forza-format.md')
 }
 
+function Get-OwnedPackagePaths([string]$GamePath, [string]$GameRoot) {
+    @((Join-Path $GamePath 'dinput8.dll'), (Join-Path $GameRoot 'Wheel settings.bat')) +
+        @(Get-SetupPackageFiles | ForEach-Object { Join-Path $GamePath "DBCE-Wheel-Setup\$_" })
+}
+
+function Read-PackageReceipt([string]$Path, [string]$GamePath, [string]$GameRoot) {
+    # Parse one snapshot. A malformed receipt never falls back to legacy detection.
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $receipt = [Text.UTF8Encoding]::new($false,$true).GetString($bytes) | ConvertFrom-Json
+    if ($receipt.Product -cne 'milestone-wheel-tools' -or $receipt.Game -cne 'Gravel' -or
+        $receipt.Version -notmatch '^\d+\.\d+\.\d+$' -or
+        -not [IO.Path]::IsPathRooted($receipt.GameRoot) -or
+        [IO.Path]::GetFullPath($receipt.GameRoot) -ine [IO.Path]::GetFullPath($GameRoot)) {
+        throw 'Install receipt does not match this game folder; no files were changed.'
+    }
+    $allowed = @(Get-OwnedPackagePaths $GamePath $GameRoot)
+    $files = @($receipt.OwnedFiles)
+    if ($files.Count -ne $allowed.Count) { throw 'Install receipt file count is invalid; no files were changed.' }
+    $seen = @{}
+    foreach ($item in $files) {
+        if (-not [IO.Path]::IsPathRooted($item.Path)) { throw 'Install receipt path must be absolute.' }
+        $full = Assert-PackagePath $item.Path $GameRoot
+        if ($full -notin $allowed -or $seen.ContainsKey($full) -or $item.Hash -notmatch '^[a-fA-F0-9]{64}$') {
+            throw 'Install receipt contains an unexpected or duplicate file; no files were changed.'
+        }
+        $seen[$full] = $item.Hash.ToLowerInvariant()
+    }
+    [pscustomobject]@{ Files=$seen; Hash=(Get-ByteHash $bytes) }
+}
+
+function Test-KnownLegacyProxy([string]$Hash) {
+    # Exact public dist/dinput8.dll identities: v0.1.0 tag aca420a5 and
+    # main d019d5a (also documented 0.2.0 deployment source 3545810f).
+    # No substring markers or guessed historical binaries are accepted.
+    $Hash -iin @('a9940602daee99f3a7139b56230df2b4b6466be80e78b356e9cd93d8ecb531be',
+                '4e74d46dcfe100c378de3778f3238d941102689bd9fff348b2cecd335b7e2c30')
+}
+
+function Get-InstallOwnership([string]$GamePath, [string]$GameRoot) {
+    $receiptPath = Join-Path $GamePath 'milestone_install.json'
+    $prior = if ([IO.File]::Exists($receiptPath)) { Read-PackageReceipt $receiptPath $GamePath $GameRoot } else { $null }
+    $expected = @{}
+    foreach ($path in Get-OwnedPackagePaths $GamePath $GameRoot) {
+        $hash = if ([IO.File]::Exists($path)) { Get-ByteHash ([IO.File]::ReadAllBytes($path)) } else { $null }
+        if ($null -ne $hash) {
+            if ($null -ne $prior) {
+                if ($hash -ine $prior.Files[$path]) { throw "Modified installed file kept; update refused: $path" }
+            } elseif ($path -ine (Join-Path $GamePath 'dinput8.dll') -or -not (Test-KnownLegacyProxy $hash)) {
+                throw "Unknown installed file kept; a valid prior receipt is required: $path"
+            }
+        }
+        $expected[$path] = $hash
+    }
+    $expected[$receiptPath] = if ($null -ne $prior) { $prior.Hash } else { $null }
+    return $expected
+}
+
 function Get-PackageFiles {
     @('Install.ps1','Install.bat','README.md','LICENSE','dist\dinput8.dll','games\gravel\milestone_mod.ini','lib\toolkit\VERSION',
       'docs\directinput-sixdof.md','docs\UX-OVERNIGHT-2026-09-16.md') + @(Get-SetupPackageFiles) | Sort-Object -Unique
@@ -173,4 +234,4 @@ function Assert-PackageManifest([string]$Root) {
     }
 }
 
-Export-ModuleMember -Function Get-ByteHash,Assert-PackagePath,Invoke-PackageInstall,Invoke-PackageRemoval,Add-WheelProfile,Get-SetupPackageFiles,Get-PackageFiles,Assert-PackageManifest
+Export-ModuleMember -Function Get-ByteHash,Assert-PackagePath,Invoke-PackageInstall,Invoke-PackageRemoval,Add-WheelProfile,Get-SetupPackageFiles,Get-PackageFiles,Assert-PackageManifest,Get-OwnedPackagePaths,Read-PackageReceipt,Test-KnownLegacyProxy,Get-InstallOwnership
