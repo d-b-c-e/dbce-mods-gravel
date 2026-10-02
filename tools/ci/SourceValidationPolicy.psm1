@@ -7,8 +7,6 @@ function Assert-SourceValidationWorkflow([string]$Text) {
 name: Gravel source validation
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
 
 permissions:
