@@ -159,7 +159,9 @@ Advanced installer switches (ordinary updates keep existing settings):
 `-WhatIf`) from the complete verified package with Gravel closed. It validates
 the same package, receipt, ownership hashes and target paths, then reports
 Create / Replace / Preserve for each proposed file. Blocking conflicts stop the
-plan with an error. No settings, receipts or backups are written.
+plan with an error. File targets that are directories, and paths containing
+junctions or other reparse points, are rejected before target content is read.
+No settings, receipts or backups are written.
 
 A check uses a valid saved wheel identity or an explicit `-Product`; it never
 enumerates hardware or asks you to choose a device. Use `-GamePath` to select an

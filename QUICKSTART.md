@@ -24,7 +24,8 @@ and run Uninstall.bat. Personal configuration, mappings and backups are kept.
 **Check only:** run `Install.ps1 -Check` from the complete verified package to
 see proposed Create / Replace / Preserve actions without saving or installing.
 `-DryRun` and `-WhatIf` do the same. A valid saved wheel identity or explicit
-`-Product` is required; hardware is not enumerated. Conflicts stop with an error.
+`-Product` is required; hardware is not enumerated. Directory conflicts and
+junctions or other reparse points in target paths stop with an error.
 Re-run without these switches to install after fresh validation.
 
 Only Gravel is supported by this package. No Python, compiler or SDK is needed

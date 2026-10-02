@@ -119,6 +119,38 @@ try {
     Reject { Get-PackageInstallPlan @((Entry '..\escape.ini' 'bad')) $fixture } 'Plan accepted escaped path.'
     Reject { Get-PackageInstallPlan @($items[0],$items[0]) $fixture } 'Plan accepted duplicate target.'
     Assert ((Snapshot $fixture) -ceq $pathBefore) 'Failed plan path validation wrote files.'
+    $directoryTarget=Join-Path $fixture 'directory-file-conflict'
+    [IO.Directory]::CreateDirectory($directoryTarget) | Out-Null
+    $directoryEntries=@([pscustomobject]@{Path=$directoryTarget;Bytes=[Text.Encoding]::UTF8.GetBytes('new')})
+    $before=Snapshot $fixture
+    Reject { Get-PackageInstallPlan $directoryEntries $fixture } 'Shared planner accepted directory file target.' 'Directory conflicts'
+    Reject { Invoke-PackageInstall $directoryEntries $fixture (Join-Path $fixture 'directory-backup') } 'Transaction accepted directory file target.' 'Directory conflicts'
+    Assert ((Snapshot $fixture) -ceq $before) 'Directory conflict changed fixture state.'
+    $junctionRoot=Join-Path $fixture 'junction-case'
+    $outside=Join-Path $fixture 'outside-allowed-root'
+    [IO.Directory]::CreateDirectory($junctionRoot) | Out-Null
+    [IO.Directory]::CreateDirectory($outside) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $outside 'sentinel.ini'),'synthetic outside bytes')
+    $link=Join-Path $junctionRoot 'linked'
+    New-Item -ItemType Junction -Path $link -Target $outside -ErrorAction Stop | Out-Null
+    $linkEntries=@([pscustomobject]@{Path=(Join-Path $link 'sentinel.ini');Bytes=[Text.Encoding]::UTF8.GetBytes('replacement')})
+    $before=Snapshot $junctionRoot; $outsideBefore=Snapshot $outside
+    $lock=[IO.File]::Open((Join-Path $outside 'sentinel.ini'),'Open','Read',[IO.FileShare]::None)
+    try {
+        Reject { Get-PackageInstallPlan $linkEntries $junctionRoot } 'Planner followed junction before rejecting it.' 'Reparse'
+        Reject { Invoke-PackageInstall $linkEntries $junctionRoot (Join-Path $junctionRoot 'backup') } 'Transaction followed junction.' 'Reparse'
+        Reject { Get-PackageInstallPlan $linkEntries $link } 'Planner accepted reparse allowed root.' 'Reparse'
+        $nestedEntries=@([pscustomobject]@{Path=(Join-Path $link 'nested\new.ini');Bytes=[Text.Encoding]::UTF8.GetBytes('new')})
+        Reject { Get-PackageInstallPlan $nestedEntries (Join-Path $link 'nested') } 'Planner accepted reparse above allowed root.' 'Reparse'
+    } finally { $lock.Dispose() }
+    Assert ((Snapshot $junctionRoot) -ceq $before) 'Junction rejection changed target state.'
+    Assert ((Snapshot $outside) -ceq $outsideBefore) 'Junction rejection changed outside bytes.'
+    $raceLink=Join-Path $junctionRoot 'late-link'
+    $raceLinkEntries=@([pscustomobject]@{Path=(Join-Path $raceLink 'new.ini');Bytes=[Text.Encoding]::UTF8.GetBytes('new')})
+    $lateLinkGuard={New-Item -ItemType Junction -Path $raceLink -Target $outside -ErrorAction Stop | Out-Null}
+    Reject { Invoke-PackageInstall $raceLinkEntries $junctionRoot (Join-Path $junctionRoot 'late-backup') -BeforeWrite $lateLinkGuard } 'Fresh prewrite checks accepted late junction.' 'Reparse'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $junctionRoot 'late-backup'))) 'Late junction created backup writes.'
+    Assert ((Snapshot $outside) -ceq $outsideBefore) 'Late junction wrote outside allowed root.'
     [IO.File]::WriteAllText($old, 'owner data')
     $result = Invoke-PackageInstall $items $fixture (Join-Path $fixture 'success')
     Assert ($result.ChangedFiles -eq 3) 'Transaction did not install all files.'
@@ -168,6 +200,27 @@ try {
     [IO.File]::WriteAllText((Join-Path $gameRoot 'Wheel settings.bat'), 'REM DBCE Milestone wheel settings spoof')
     Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game } 'Launcher marker spoof was replaced.' 'Unknown installed file'
     Remove-Item -LiteralPath (Join-Path $gameRoot 'Wheel settings.bat')
+    foreach($relative in @('dinput8.dll','milestone_install.json','milestone_mod.ini','DBCE-Wheel-Setup\WheelSetup.ps1')) {
+        $target=Join-Path $game $relative
+        $savedBytes=if([IO.File]::Exists($target)){[IO.File]::ReadAllBytes($target)}else{$null}
+        if($null -ne $savedBytes){Remove-Item -LiteralPath $target}
+        [IO.Directory]::CreateDirectory($target) | Out-Null
+        $before=Snapshot $gameRoot
+        Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check -Product 0006346e } "Full plan accepted directory $relative" 'Directory conflicts'
+        Assert ((Snapshot $gameRoot) -ceq $before) "Directory $relative plan changed target."
+        [IO.Directory]::Delete($target,$false)
+        if($null -ne $savedBytes){[IO.File]::WriteAllBytes($target,$savedBytes)}
+    }
+    $setupJunction=Join-Path $game 'DBCE-Wheel-Setup'
+    # The earlier orphan fixture left an empty directory; remove only that
+    # verified-empty synthetic directory, never recursively traverse the link.
+    if(Test-Path -LiteralPath $setupJunction){[IO.Directory]::Delete($setupJunction,$false)}
+    New-Item -ItemType Junction -Path $setupJunction -Target $outside -ErrorAction Stop | Out-Null
+    $before=Snapshot $gameRoot; $outsideBefore=Snapshot $outside
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check -Product 0006346e } 'Full installer plan accepted setup junction.' 'Reparse'
+    Assert ((Snapshot $gameRoot) -ceq $before) 'Setup-junction plan changed target.'
+    Assert ((Snapshot $outside) -ceq $outsideBefore) 'Setup-junction plan changed outside bytes.'
+    [IO.Directory]::Delete($setupJunction,$false)
     # Hardware discovery is replaced only in this disposable package, with its
     # manifest updated. Plans must pass or fail without calling the sentinel.
     $toolkitPath=Join-Path $PackageRoot 'lib\toolkit\powershell\DbceWheel.psm1'

@@ -57,7 +57,7 @@ $checkClosed = {
 
 $destDll = Join-Path $GamePath 'dinput8.dll'
 $ownership = Get-InstallOwnership $GamePath $gameRoot
-$destIni = Join-Path $GamePath 'milestone_mod.ini'
+$destIni = Assert-PackagePath (Join-Path $GamePath 'milestone_mod.ini') $gameRoot -FileTarget
 $existing = if (Test-Path -LiteralPath $destIni) { [IO.File]::ReadAllText($destIni) } else { $null }
 $savedProduct = if ($null -ne $existing) { Get-ModSetting $existing 'proxy' 'product' } else { '' }
 $productName = 'Steering wheel'
@@ -93,7 +93,7 @@ $entries = @(
     [pscustomobject]@{ Path=$destIni; Bytes=$iniBytes }
 )
 if (-not $SkipWheelConfig) {
-    $wheelConfig = Join-Path $inner 'Config\WindowsNoEditor\WheelConfig.ini'
+    $wheelConfig = Assert-PackagePath (Join-Path $inner 'Config\WindowsNoEditor\WheelConfig.ini') $gameRoot -FileTarget
     if (-not (Test-Path -LiteralPath $wheelConfig)) { Fail 'Gravel WheelConfig.ini was not found. Restore the game file before installing, or explicitly use -SkipWheelConfig.' }
     $wheelText = [IO.File]::ReadAllText($wheelConfig)
     $wheelNew = Add-WheelProfile $wheelText $productKey $productName

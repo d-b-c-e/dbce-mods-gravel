@@ -7,23 +7,44 @@ function Get-ByteHash([byte[]]$Bytes) {
     finally { $hash.Dispose() }
 }
 
-function Assert-PackagePath([string]$Path, [string]$AllowedRoot) {
+function Assert-PackagePath([string]$Path, [string]$AllowedRoot, [switch]$FileTarget) {
     $full = [IO.Path]::GetFullPath($Path)
     $root = [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
     if (-not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw "Install path is outside the selected game: $full" }
+    # Walk from the filesystem root down, so no target is read through a link
+    # before its ancestors have been checked. Missing components are allowed.
+    $probes=@()
+    $probe=$full
+    while($probe) {
+        $probes += $probe
+        $parent=Split-Path $probe -Parent
+        if($parent -ceq $probe){break}
+        $probe=$parent
+    }
+    [array]::Reverse($probes)
+    foreach($probe in $probes) {
+        try { $item=Get-Item -LiteralPath $probe -Force -ErrorAction Stop }
+        catch [System.Management.Automation.ItemNotFoundException] { continue }
+        if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Reparse target or ancestor refused: $probe" }
+        if($probe -ine $full -and -not $item.PSIsContainer) { throw "File blocks target directory path: $probe" }
+        if($FileTarget -and $probe -ieq $full -and $item.PSIsContainer) { throw "Directory conflicts with file target: $full" }
+    }
     return $full
 }
 
-function Write-PackageBytes([string]$Path, [byte[]]$Bytes) {
+function Write-PackageBytes([string]$Path, [byte[]]$Bytes, [string]$AllowedRoot) {
+    $null=Assert-PackagePath $Path $AllowedRoot -FileTarget
     [IO.Directory]::CreateDirectory((Split-Path $Path -Parent)) | Out-Null
     $temp = Join-Path (Split-Path $Path -Parent) ('.dbce-write-' + [guid]::NewGuid().ToString('N') + '.tmp')
     try {
+        $null=Assert-PackagePath $temp $AllowedRoot -FileTarget
         [IO.File]::WriteAllBytes($temp, $Bytes)
+        $null=Assert-PackagePath $Path $AllowedRoot -FileTarget
         if ([IO.File]::Exists($Path)) {
             [IO.File]::Replace($temp, $Path, "$temp.previous")
             Remove-Item -LiteralPath "$temp.previous"
         } else { [IO.File]::Move($temp, $Path) }
-    } finally { if ([IO.File]::Exists($temp)) { Remove-Item -LiteralPath $temp } }
+    } finally { $null=Assert-PackagePath $temp $AllowedRoot -FileTarget; if ([IO.File]::Exists($temp)) { Remove-Item -LiteralPath $temp } }
 }
 
 function Get-PackageInstallItems {
@@ -31,7 +52,7 @@ function Get-PackageInstallItems {
     $seen = @{}
     $items = @()
     foreach ($entry in $Entries) {
-        $path = Assert-PackagePath $entry.Path $AllowedRoot
+        $path = Assert-PackagePath $entry.Path $AllowedRoot -FileTarget
         if ($seen.ContainsKey($path)) { throw "Duplicate install target: $path" }
         $seen[$path] = $true
         $old = if ([IO.File]::Exists($path)) { ,([IO.File]::ReadAllBytes($path)) } else { $null }
@@ -68,19 +89,23 @@ function Invoke-PackageInstall {
         $items[$index] | Add-Member -NotePropertyName Backup -NotePropertyValue $backupPath
     }
     if ($BeforeWrite) { & $BeforeWrite }
+    $null=Assert-PackagePath $BackupRoot $AllowedRoot
+    foreach($item in $items){$null=Assert-PackagePath $item.Path $AllowedRoot -FileTarget}
     [IO.Directory]::CreateDirectory($BackupRoot) | Out-Null
-    foreach ($item in $items) { if ($null -ne $item.Original) { [IO.File]::WriteAllBytes($item.Backup, $item.Original) } }
+    foreach ($item in $items) { if ($null -ne $item.Original) { $null=Assert-PackagePath $item.Backup $AllowedRoot -FileTarget; [IO.File]::WriteAllBytes($item.Backup, $item.Original) } }
     $record = @($items | Select-Object Path,OriginalHash,NewHash,Backup)
-    [IO.File]::WriteAllText((Join-Path $BackupRoot 'manifest.json'), ($record | ConvertTo-Json -Depth 5))
+    $manifestPath=Assert-PackagePath (Join-Path $BackupRoot 'manifest.json') $AllowedRoot -FileTarget
+    [IO.File]::WriteAllText($manifestPath, ($record | ConvertTo-Json -Depth 5))
     $applied = @()
     try {
         foreach ($item in $items) {
             if ($BeforeWrite) { & $BeforeWrite }
+            $null=Assert-PackagePath $item.Path $AllowedRoot -FileTarget
             $current = if ([IO.File]::Exists($item.Path)) { Get-ByteHash ([IO.File]::ReadAllBytes($item.Path)) } else { $null }
             if ($current -cne $item.OriginalHash) { throw "Another process changed $($item.Path); install stopped." }
             if ($item.NewHash -ceq $item.OriginalHash) { continue }
             $applied += $item
-            Write-PackageBytes $item.Path $item.Bytes
+            Write-PackageBytes $item.Path $item.Bytes $AllowedRoot
             if ($applied.Count -eq $FailAfterWrite) { throw 'Injected fixture install failure.' }
         }
     } catch {
@@ -90,10 +115,11 @@ function Invoke-PackageInstall {
         foreach ($item in $applied) {
             try {
                 if ($BeforeWrite) { & $BeforeWrite }
+                $null=Assert-PackagePath $item.Path $AllowedRoot -FileTarget
                 $current = if ([IO.File]::Exists($item.Path)) { Get-ByteHash ([IO.File]::ReadAllBytes($item.Path)) } else { $null }
                 if ($current -ceq $item.OriginalHash) { continue }
                 if ($current -cne $item.NewHash) { throw 'Changed externally; left untouched.' }
-                if ($null -ne $item.Original) { Write-PackageBytes $item.Path $item.Original }
+                if ($null -ne $item.Original) { Write-PackageBytes $item.Path $item.Original $AllowedRoot }
                 else { Remove-Item -LiteralPath $item.Path }
             } catch { $rollbackErrors += "$($item.Path): $($_.Exception.Message)" }
         }
@@ -122,7 +148,7 @@ function Invoke-PackageRemoval {
     $items = @()
     $seen = @{}
     foreach ($entry in $Entries) {
-        $path = Assert-PackagePath $entry.Path $AllowedRoot
+        $path = Assert-PackagePath $entry.Path $AllowedRoot -FileTarget
         if ($seen.ContainsKey($path)) { throw "Duplicate removal target: $path" }
         $seen[$path] = $true
         $bytes = [IO.File]::ReadAllBytes($path)
@@ -131,13 +157,17 @@ function Invoke-PackageRemoval {
         $items += [pscustomobject]@{ Path=$path; Bytes=$bytes; Hash=$hash; Backup=(Join-Path $BackupRoot (('{0:D3}-' -f $items.Count) + [IO.Path]::GetFileName($path))) }
     }
     if ($BeforeWrite) { & $BeforeWrite }
+    $null=Assert-PackagePath $BackupRoot $AllowedRoot
+    foreach($item in $items){$null=Assert-PackagePath $item.Path $AllowedRoot -FileTarget}
     [IO.Directory]::CreateDirectory($BackupRoot) | Out-Null
-    foreach ($item in $items) { [IO.File]::WriteAllBytes($item.Backup, $item.Bytes) }
-    [IO.File]::WriteAllText((Join-Path $BackupRoot 'manifest.json'), (@($items | Select-Object Path,Hash,Backup) | ConvertTo-Json -Depth 5))
+    foreach ($item in $items) { $null=Assert-PackagePath $item.Backup $AllowedRoot -FileTarget; [IO.File]::WriteAllBytes($item.Backup, $item.Bytes) }
+    $manifestPath=Assert-PackagePath (Join-Path $BackupRoot 'manifest.json') $AllowedRoot -FileTarget
+    [IO.File]::WriteAllText($manifestPath, (@($items | Select-Object Path,Hash,Backup) | ConvertTo-Json -Depth 5))
     $removed = @()
     try {
         foreach ($item in $items) {
             if ($BeforeWrite) { & $BeforeWrite }
+            $null=Assert-PackagePath $item.Path $AllowedRoot -FileTarget
             if ((Get-ByteHash ([IO.File]::ReadAllBytes($item.Path))) -cne $item.Hash) { throw "File changed during removal: $($item.Path)" }
             $removed += $item
             Remove-Item -LiteralPath $item.Path -ErrorAction Stop
@@ -149,11 +179,12 @@ function Invoke-PackageRemoval {
         foreach ($item in $removed) {
             try {
                 if ($BeforeWrite) { & $BeforeWrite }
+                $null=Assert-PackagePath $item.Path $AllowedRoot -FileTarget
                 if ([IO.File]::Exists($item.Path)) {
                     if ((Get-ByteHash ([IO.File]::ReadAllBytes($item.Path))) -cne $item.Hash) { throw 'External replacement left untouched.' }
                     continue
                 }
-                Write-PackageBytes $item.Path $item.Bytes
+                Write-PackageBytes $item.Path $item.Bytes $AllowedRoot
             } catch { $rollbackErrors += "$($item.Path): $($_.Exception.Message)" }
         }
         if ($rollbackErrors.Count) { throw "$failure Removal rollback needs attention: $($rollbackErrors -join '; '). Backups: $BackupRoot" }
@@ -175,6 +206,7 @@ function Get-OwnedPackagePaths([string]$GamePath, [string]$GameRoot) {
 
 function Read-PackageReceipt([string]$Path, [string]$GamePath, [string]$GameRoot) {
     # Parse one snapshot. A malformed receipt never falls back to legacy detection.
+    $Path=Assert-PackagePath $Path $GameRoot -FileTarget
     $bytes = [IO.File]::ReadAllBytes($Path)
     $receipt = [Text.UTF8Encoding]::new($false,$true).GetString($bytes) | ConvertFrom-Json
     if ($receipt.Product -cne 'milestone-wheel-tools' -or $receipt.Game -cne 'Gravel' -or
@@ -189,7 +221,7 @@ function Read-PackageReceipt([string]$Path, [string]$GamePath, [string]$GameRoot
     $seen = @{}
     foreach ($item in $files) {
         if (-not [IO.Path]::IsPathRooted($item.Path)) { throw 'Install receipt path must be absolute.' }
-        $full = Assert-PackagePath $item.Path $GameRoot
+        $full = Assert-PackagePath $item.Path $GameRoot -FileTarget
         if ($full -notin $allowed -or $seen.ContainsKey($full) -or $item.Hash -notmatch '^[a-fA-F0-9]{64}$') {
             throw 'Install receipt contains an unexpected or duplicate file; no files were changed.'
         }
@@ -207,10 +239,11 @@ function Test-KnownLegacyProxy([string]$Hash) {
 }
 
 function Get-InstallOwnership([string]$GamePath, [string]$GameRoot) {
-    $receiptPath = Join-Path $GamePath 'milestone_install.json'
+    $receiptPath = Assert-PackagePath (Join-Path $GamePath 'milestone_install.json') $GameRoot -FileTarget
     $prior = if ([IO.File]::Exists($receiptPath)) { Read-PackageReceipt $receiptPath $GamePath $GameRoot } else { $null }
     $expected = @{}
     foreach ($path in Get-OwnedPackagePaths $GamePath $GameRoot) {
+        $null=Assert-PackagePath $path $GameRoot -FileTarget
         $hash = if ([IO.File]::Exists($path)) { Get-ByteHash ([IO.File]::ReadAllBytes($path)) } else { $null }
         if ($null -ne $hash) {
             if ($null -ne $prior) {
