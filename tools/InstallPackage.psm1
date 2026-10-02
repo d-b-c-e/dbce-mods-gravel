@@ -26,11 +26,8 @@ function Write-PackageBytes([string]$Path, [byte[]]$Bytes) {
     } finally { if ([IO.File]::Exists($temp)) { Remove-Item -LiteralPath $temp } }
 }
 
-function Invoke-PackageInstall {
-    param([object[]]$Entries, [string]$AllowedRoot, [string]$BackupRoot,
-          [scriptblock]$BeforeWrite, [int]$FailAfterWrite = -1)
-    $BackupRoot = Assert-PackagePath $BackupRoot $AllowedRoot
-    if (Test-Path -LiteralPath $BackupRoot) { throw 'The backup folder already exists; choose a new install transaction.' }
+function Get-PackageInstallItems {
+    param([object[]]$Entries, [string]$AllowedRoot)
     $seen = @{}
     $items = @()
     foreach ($entry in $Entries) {
@@ -46,8 +43,29 @@ function Invoke-PackageInstall {
         $items += [pscustomobject]@{
             Path=$path; Bytes=$data; NewHash=(Get-ByteHash $data)
             Original=$old; OriginalHash=$oldHash
-            Backup=$(if ($null -ne $old) { Join-Path $BackupRoot (('{0:D3}-' -f $items.Count) + [IO.Path]::GetFileName($path)) } else { $null })
         }
+    }
+    return $items
+}
+
+function Get-PackageInstallPlan {
+    param([object[]]$Entries, [string]$AllowedRoot, [scriptblock]$BeforeRead)
+    if ($BeforeRead) { & $BeforeRead }
+    foreach ($item in @(Get-PackageInstallItems $Entries $AllowedRoot)) {
+        $action = if ($null -eq $item.OriginalHash) { 'Create' } elseif ($item.NewHash -ceq $item.OriginalHash) { 'Preserve' } else { 'Replace' }
+        [pscustomobject]@{Path=$item.Path;Action=$action;CurrentHash=$item.OriginalHash;ProposedHash=$item.NewHash}
+    }
+}
+
+function Invoke-PackageInstall {
+    param([object[]]$Entries, [string]$AllowedRoot, [string]$BackupRoot,
+          [scriptblock]$BeforeWrite, [int]$FailAfterWrite = -1)
+    $BackupRoot = Assert-PackagePath $BackupRoot $AllowedRoot
+    if (Test-Path -LiteralPath $BackupRoot) { throw 'The backup folder already exists; choose a new install transaction.' }
+    $items = @(Get-PackageInstallItems $Entries $AllowedRoot)
+    for ($index=0; $index -lt $items.Count; $index++) {
+        $backupPath = if ($null -ne $items[$index].Original) { Join-Path $BackupRoot (('{0:D3}-' -f $index) + [IO.Path]::GetFileName($items[$index].Path)) } else { $null }
+        $items[$index] | Add-Member -NotePropertyName Backup -NotePropertyValue $backupPath
     }
     if ($BeforeWrite) { & $BeforeWrite }
     [IO.Directory]::CreateDirectory($BackupRoot) | Out-Null
@@ -234,4 +252,4 @@ function Assert-PackageManifest([string]$Root) {
     }
 }
 
-Export-ModuleMember -Function Get-ByteHash,Assert-PackagePath,Invoke-PackageInstall,Invoke-PackageRemoval,Add-WheelProfile,Get-SetupPackageFiles,Get-PackageFiles,Assert-PackageManifest,Get-OwnedPackagePaths,Read-PackageReceipt,Test-KnownLegacyProxy,Get-InstallOwnership
+Export-ModuleMember -Function Get-ByteHash,Assert-PackagePath,Invoke-PackageInstall,Invoke-PackageRemoval,Add-WheelProfile,Get-SetupPackageFiles,Get-PackageFiles,Assert-PackageManifest,Get-OwnedPackagePaths,Read-PackageReceipt,Test-KnownLegacyProxy,Get-InstallOwnership,Get-PackageInstallPlan

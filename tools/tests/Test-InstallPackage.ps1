@@ -30,6 +30,15 @@ function Reject([scriptblock]$Action, [string]$Message, [string]$Pattern) {
     if ($Pattern) { Assert ($errorText -match $Pattern) "Wrong failure for $Message : $errorText" }
 }
 function Entry([string]$Name, [string]$Text) { [pscustomobject]@{ Path=(Join-Path $fixture $Name); Bytes=[Text.Encoding]::UTF8.GetBytes($Text) } }
+function Snapshot([string]$Root) {
+    $rootFull=[IO.Path]::GetFullPath($Root)
+    $items=@(Get-Item -LiteralPath $rootFull) + @(Get-ChildItem -LiteralPath $rootFull -Recurse -Force)
+    @($items | Sort-Object FullName | ForEach-Object {
+        # Query timestamp directly rather than cached directory-enumeration data.
+        $lastWrite=if($_.PSIsContainer){[IO.Directory]::GetLastWriteTimeUtc($_.FullName).Ticks}else{[IO.File]::GetLastWriteTimeUtc($_.FullName).Ticks}
+        [pscustomobject]@{Path=$_.FullName.Substring($rootFull.Length);Directory=$_.PSIsContainer;Attributes=[int]$_.Attributes;LastWriteUtc=$lastWrite;Hash=$(if(-not $_.PSIsContainer){Get-ByteHash ([IO.File]::ReadAllBytes($_.FullName))}else{$null})}
+    }) | ConvertTo-Json -Depth 5 -Compress
+}
 function Get-Process { @() }
 try {
     Assert (Test-KnownLegacyProxy 'a9940602daee99f3a7139b56230df2b4b6466be80e78b356e9cd93d8ecb531be') 'Verified v0.1.0 identity missing.'
@@ -102,6 +111,14 @@ try {
     $raceEntry = Entry 'existing.ini' 'replacement'
     $raceEntry | Add-Member -NotePropertyName ExpectedHash -NotePropertyValue (Get-ByteHash ([Text.Encoding]::UTF8.GetBytes('owner data')))
     Reject { Invoke-PackageInstall @($raceEntry) $fixture (Join-Path $fixture 'ownership-race') } 'Changed ownership snapshot accepted.' 'Ownership changed'
+    $raceBefore=Snapshot $fixture
+    Reject { Get-PackageInstallPlan @($raceEntry) $fixture } 'Plan accepted ownership race.' 'Ownership changed'
+    $raceAfter=Snapshot $fixture
+    Assert ($raceAfter -ceq $raceBefore) 'Ownership-race plan changed external bytes or filesystem state.'
+    $pathBefore=Snapshot $fixture
+    Reject { Get-PackageInstallPlan @((Entry '..\escape.ini' 'bad')) $fixture } 'Plan accepted escaped path.'
+    Reject { Get-PackageInstallPlan @($items[0],$items[0]) $fixture } 'Plan accepted duplicate target.'
+    Assert ((Snapshot $fixture) -ceq $pathBefore) 'Failed plan path validation wrote files.'
     [IO.File]::WriteAllText($old, 'owner data')
     $result = Invoke-PackageInstall $items $fixture (Join-Path $fixture 'success')
     Assert ($result.ChangedFiles -eq 3) 'Transaction did not install all files.'
@@ -138,6 +155,9 @@ try {
     Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game } 'Marker spoof was installed.' 'Unknown installed file'
     Reject { & (Join-Path $PackageRoot 'Uninstall.ps1') -GamePath $game } 'Marker spoof was removed.' 'Unknown receiptless'
     Assert ([IO.File]::ReadAllText((Join-Path $game 'dinput8.dll')) -ceq 'spoof milestone_mod proxy') 'Marker spoof bytes changed.'
+    $conflictBefore=Snapshot $gameRoot
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check } 'Plan accepted unknown proxy.' 'Unknown installed file'
+    Assert ((Snapshot $gameRoot) -ceq $conflictBefore) 'Conflict plan changed target filesystem.'
     Remove-Item -LiteralPath (Join-Path $game 'dinput8.dll')
     $orphanSetup = Join-Path $game 'DBCE-Wheel-Setup\WheelSetup.ps1'
     [IO.Directory]::CreateDirectory((Split-Path $orphanSetup -Parent)) | Out-Null
@@ -148,6 +168,45 @@ try {
     [IO.File]::WriteAllText((Join-Path $gameRoot 'Wheel settings.bat'), 'REM DBCE Milestone wheel settings spoof')
     Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game } 'Launcher marker spoof was replaced.' 'Unknown installed file'
     Remove-Item -LiteralPath (Join-Path $gameRoot 'Wheel settings.bat')
+    # Hardware discovery is replaced only in this disposable package, with its
+    # manifest updated. Plans must pass or fail without calling the sentinel.
+    $toolkitPath=Join-Path $PackageRoot 'lib\toolkit\powershell\DbceWheel.psm1'
+    $toolkitBytes=[IO.File]::ReadAllBytes($toolkitPath)
+    [IO.File]::WriteAllText($toolkitPath,"function Get-DirectInputDevices { throw 'forbidden fixture hardware enumeration' }`nfunction Get-SteamLibraries { @() }`nExport-ModuleMember -Function Get-DirectInputDevices,Get-SteamLibraries`n")
+    $guardManifest=$manifestText | ConvertFrom-Json
+    ($guardManifest.Files | Where-Object Path -CEQ 'lib/toolkit/powershell/DbceWheel.psm1').SHA256=Get-ByteHash ([IO.File]::ReadAllBytes($toolkitPath))
+    [IO.File]::WriteAllText($manifestPath,($guardManifest | ConvertTo-Json -Depth 6))
+    foreach ($mode in 'Check','DryRun','WhatIf') {
+        $before=Snapshot $gameRoot; $packageBefore=Snapshot $PackageRoot
+        $arguments=@{GamePath=$game;Product='0006346e'}; $arguments[$mode]=$true
+        $planned=& (Join-Path $PackageRoot 'Install.ps1') @arguments
+        Assert ($planned.Mode -ceq 'Check' -and $planned.WritesPerformed -eq 0) "$mode did not return no-write plan."
+        Assert ($planned.Files.Count -eq (@(Get-SetupPackageFiles).Count+5)) "$mode omitted planned targets."
+        Assert (($planned.Files | Where-Object Path -EQ $ini).Action -ceq 'Preserve') "$mode did not report preserved INI."
+        Assert (($planned.Files | Where-Object Path -EQ $wheel).Action -ceq 'Preserve') "$mode did not report preserved wheel profile."
+        Assert ((Snapshot $gameRoot) -ceq $before) "$mode changed target snapshot."
+        Assert ((Snapshot $PackageRoot) -ceq $packageBefore) "$mode changed source package."
+    }
+    $before=Snapshot $gameRoot
+    $planned=& (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check -Port 9456
+    Assert (($planned.Files | Where-Object Path -EQ $ini).Action -ceq 'Replace') 'Explicit plan override was not reported.'
+    Assert ($planned.SettingsOverrides.Count -eq 1 -and $planned.SettingsOverrides[0] -ceq 'Port' -and -not $planned.HardwareEnumerated) 'Plan did not identify explicit override and no hardware enumeration.'
+    Assert ((Snapshot $gameRoot) -ceq $before) 'Explicit override plan changed saved settings.'
+    $savedIniBytes=[IO.File]::ReadAllBytes($ini)
+    [IO.File]::WriteAllText($ini,"[proxy]`r`nproduct=invalid`r`n")
+    $before=Snapshot $gameRoot
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check } 'Invalid saved identity plan accepted.' 'saved wheel identity'
+    Assert ((Snapshot $gameRoot) -ceq $before) 'Invalid-identity plan changed files.'
+    Remove-Item -LiteralPath $ini
+    $before=Snapshot $gameRoot
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check } 'Plan without identity accepted.' 'Check mode requires'
+    Assert ((Snapshot $gameRoot) -ceq $before) 'Missing-identity plan wrote files.'
+    $planned=& (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check -Product 0006346e
+    Assert (($planned.Files | Where-Object Path -EQ $ini).Action -ceq 'Create') 'Fresh explicit-identity plan did not report new INI.'
+    Assert ((Snapshot $gameRoot) -ceq $before) 'Fresh plan wrote files.'
+    [IO.File]::WriteAllBytes($ini,$savedIniBytes)
+    [IO.File]::WriteAllBytes($toolkitPath,$toolkitBytes)
+    [IO.File]::WriteAllText($manifestPath,$manifestText)
     & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game
     Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($ini))) -eq $iniHash) 'Update changed encoding or custom INI bytes.'
     Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($wheel))) -eq $wheelHash) 'Update changed existing wheel profile.'
@@ -156,6 +215,32 @@ try {
     foreach ($item in $receipt.OwnedFiles) { Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($item.Path))) -eq $item.Hash) "Installed receipt mismatch: $($item.Path)" }
     $receiptPath = Join-Path $game 'milestone_install.json'
     $receiptBytes = [IO.File]::ReadAllBytes($receiptPath)
+    $before=Snapshot $gameRoot
+    $planned=& (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check
+    Assert ((Snapshot $gameRoot) -ceq $before) 'Receipt-backed update plan wrote files.'
+    Assert (($planned.Files | Where-Object Path -EQ (Join-Path $game 'dinput8.dll')).Action -ceq 'Preserve') 'Update plan did not preserve known proxy.'
+    $global:GravelPlanRaceFixture=@{Checks=0;File=(Join-Path $game 'DBCE-Wheel-Setup\QUICKSTART.md');Root=$gameRoot;Snapshot=$null}
+    $raceBytes=[IO.File]::ReadAllBytes($global:GravelPlanRaceFixture.File)
+    function Get-Process {
+        $global:GravelPlanRaceFixture.Checks++
+        if($global:GravelPlanRaceFixture.Checks -eq 2) {
+            [IO.File]::AppendAllText($global:GravelPlanRaceFixture.File,'external plan race edit')
+            $global:GravelPlanRaceFixture.Snapshot=Snapshot $global:GravelPlanRaceFixture.Root
+        }
+        @()
+    }
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check } 'Plan missed edit after ownership validation.' 'Ownership changed'
+    Assert ((Snapshot $gameRoot) -ceq $global:GravelPlanRaceFixture.Snapshot) 'Plan race erased external edit or changed other targets.'
+    [IO.File]::WriteAllBytes($global:GravelPlanRaceFixture.File,$raceBytes)
+    Remove-Variable -Name GravelPlanRaceFixture -Scope Global
+    function Get-Process { @() }
+    $global:GravelPlanRunningFixturePath=Join-Path $game 'gravel-Win64-Shipping.exe'
+    function Get-Process { [pscustomobject]@{Path=$global:GravelPlanRunningFixturePath} }
+    $before=Snapshot $gameRoot
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check } 'Plan ignored running-game guard.' 'Gravel is running'
+    Assert ((Snapshot $gameRoot) -ceq $before) 'Running-game refusal changed plan target.'
+    function Get-Process { @() }
+    Remove-Variable -Name GravelPlanRunningFixturePath -Scope Global
     $setup = Join-Path $game 'DBCE-Wheel-Setup\WheelSetup.ps1'
     $setupBytes = [IO.File]::ReadAllBytes($setup)
     [IO.File]::AppendAllText($setup, 'owner edit')
@@ -163,6 +248,9 @@ try {
     Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game } 'Modified setup was overwritten.' 'Modified installed file'
     Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($setup))) -ceq $editedHash) 'Edited setup changed on refusal.'
     Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($receiptPath))) -ceq (Get-ByteHash $receiptBytes)) 'Refused update changed receipt.'
+    $before=Snapshot $gameRoot
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check } 'Plan accepted edited setup.' 'Modified installed file'
+    Assert ((Snapshot $gameRoot) -ceq $before) 'Edited-setup plan changed target.'
     [IO.File]::WriteAllBytes($setup, $setupBytes)
     foreach ($mutation in 'json','duplicate','missing','hash','game','version','path') {
         $bad = [Text.Encoding]::UTF8.GetString($receiptBytes) | ConvertFrom-Json
@@ -178,6 +266,9 @@ try {
         [IO.File]::WriteAllText($receiptPath, $badText)
         Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game } "Malformed $mutation receipt allowed upgrade."
         Reject { & (Join-Path $PackageRoot 'Uninstall.ps1') -GamePath $game } "Malformed $mutation receipt allowed removal."
+        $before=Snapshot $gameRoot
+        Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check } "Plan accepted malformed $mutation receipt."
+        Assert ((Snapshot $gameRoot) -ceq $before) "Malformed $mutation plan changed target filesystem."
         Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($setup))) -ceq (Get-ByteHash $setupBytes)) "Malformed $mutation receipt changed setup."
     }
     [IO.File]::WriteAllBytes($receiptPath, $receiptBytes)

@@ -6,16 +6,18 @@
     override is supplied. The proxy, external setup tools and wheel profile
     are installed with backups and rollback; another proxy is never replaced.
 #>
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess=$true,ConfirmImpact='Medium')]
 param(
     [ValidateSet('Gravel')][string]$Game,
     [string]$GamePath,
     [ValidateRange(1,65535)][int]$Port = 5300,
     [ValidateSet('fh4','fm7','sled')][string]$Format = 'fh4',
     [string]$Product,
-    [switch]$SkipWheelConfig
+    [switch]$SkipWheelConfig,
+    [Alias('DryRun')][switch]$Check
 )
 $ErrorActionPreference = 'Stop'
+$planOnly = $Check -or $WhatIfPreference
 $root = $PSScriptRoot
 Import-Module (Join-Path $root 'tools\SetupUx.psm1') -Force
 Import-Module (Join-Path $root 'tools\InstallPackage.psm1') -Force
@@ -24,6 +26,7 @@ Import-Module (Join-Path $root 'lib\toolkit\powershell\DbceWheel.psm1') -Force
 function Say($Message) { Write-Host $Message }
 function Fail($Message) { throw $Message }
 Say 'Gravel wheel mod - install / update'
+if ($planOnly) { Say 'Check only: no writes, backups or hardware enumeration. Blocking conflicts are reported as errors.' }
 
 $dll = Join-Path $root 'dist\dinput8.dll'
 if (-not (Test-Path -LiteralPath $dll)) { Fail 'The package is incomplete. Extract the whole ZIP, including dist, and retry.' }
@@ -65,6 +68,7 @@ if ($Product) {
     if ($savedProduct -notmatch '^[a-fA-F0-9]{8}$') { Fail 'The saved wheel identity needs repair. Existing settings were kept; use an explicit -Product to replace it.' }
     $productKey = $savedProduct
 } else {
+    if ($planOnly) { Fail 'Check mode requires -Product or a valid saved wheel identity; hardware will not be enumerated.' }
     $devices = @(Get-DirectInputDevices | Where-Object { $_.ForceFeedback -and $_.Type -ne 0x15 -and $_.Name -notmatch '(?i)vjoy|vigem|xoutput|vxbox' })
     if ($devices.Count -eq 0) { Fail 'Connect the steering wheel, then retry. An explicit -Product can select a known device identity.' }
     if ($devices.Count -eq 1) { $selected = $devices[0] }
@@ -115,6 +119,17 @@ $entries += [pscustomobject]@{ Path=(Join-Path $GamePath 'milestone_install.json
 foreach ($entry in $entries) {
     if ($ownership.ContainsKey($entry.Path)) { $entry | Add-Member -NotePropertyName ExpectedHash -NotePropertyValue $ownership[$entry.Path] }
 }
+if ($planOnly) {
+    $plan = @(Get-PackageInstallPlan -Entries $entries -AllowedRoot $gameRoot -BeforeRead $checkClosed)
+    foreach ($item in $plan) { Say "$($item.Action): $($item.Path)" }
+    $overrides=@('Product','Port','Format') | Where-Object { $PSBoundParameters.ContainsKey($_) }
+    Say "Explicit settings overrides: $(if($overrides){$overrides -join ', '}else{'none'})"
+    Say 'Unspecified existing INI settings and existing wheel bindings are preserved.'
+    Say 'Plan only; no files, receipts or backups were written. Re-run the installer without Check/DryRun/WhatIf to apply after revalidation.'
+    [pscustomobject]@{Mode='Check';Game='Gravel';GameRoot=$gameRoot;Product=$productKey;Files=$plan;SettingsOverrides=@($overrides);HardwareEnumerated=$false;WritesPerformed=0}
+    return
+}
+if (-not $PSCmdlet.ShouldProcess($gameRoot,'Install/update the Gravel package with backups and rollback')) { return }
 $backup = Join-Path $GamePath ('DBCE-Wheel-Backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,6))
 $result = Invoke-PackageInstall -Entries $entries -AllowedRoot $gameRoot -BackupRoot $backup -BeforeWrite $checkClosed
 Say "Installed $version. Backups: $($result.BackupRoot)"

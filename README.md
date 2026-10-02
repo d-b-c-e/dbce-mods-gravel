@@ -155,6 +155,19 @@ Advanced installer switches (ordinary updates keep existing settings):
 .\Install.ps1 -Product 0006346e                   # if it picks the wrong device
 ```
 
+**Check before applying:** run `Install.ps1 -Check` (also `-DryRun` or
+`-WhatIf`) from the complete verified package with Gravel closed. It validates
+the same package, receipt, ownership hashes and target paths, then reports
+Create / Replace / Preserve for each proposed file. Blocking conflicts stop the
+plan with an error. No settings, receipts or backups are written.
+
+A check uses a valid saved wheel identity or an explicit `-Product`; it never
+enumerates hardware or asks you to choose a device. Use `-GamePath` to select an
+exact folder. Explicit Port/Format/Product overrides are shown in the proposed
+configuration change while other saved settings remain preserved. The plan is
+a point-in-time check, not a write-permission/lock test or an install receipt.
+Re-run without Check/DryRun/WhatIf to apply; ownership and state are revalidated.
+
 The runtime DLL belongs beside `gravel-Win64-Shipping.exe` in
 `Gravel\gravel\Binaries\Win64`; the launcher belongs in `Gravel`.
 Keep the complete package when moving or reinstalling; copying the DLL alone
