@@ -4,7 +4,9 @@ The organization documentation was published in commit
 `d019d5a2468a1ee9c179b47bf5921e3eae0055c8`, based on main `cb7a4526`.
 The canonical repository is [d-b-c-e/dbce-mods-gravel](https://github.com/d-b-c-e/dbce-mods-gravel).
 The in-place rename and documentation integration are complete. Neither created
-a product release. The installer ownership-safety follow-up is a review candidate.
+a product release. Installer ownership safety was independently reviewed and
+promoted to main at `54561c88ff1a43fe0adf2cf4f7b5f35066a69bea`; the package
+provenance follow-up is now a separate review candidate.
 
 ## Repository and ownership
 
@@ -50,6 +52,11 @@ and creates one ZIP. This document is source documentation; it is not added to
 that allowlist. README remains part of the existing package. No binary rebuild
 or release publication is proposed by this documentation change.
 
+The packaging-source identity is distinct from retained binary origin. The
+provenance review candidate requires exact retained-artifact metadata and hashes
+before ZIP creation; see [binary provenance](BINARY-PROVENANCE.md). Missing build
+receipts do not become fresh-build claims. Installer/removal behavior is unchanged.
+
 Keep the vendored wheel toolkit v0.8.0 pin. Shared toolkit fixes belong upstream;
 do not modify vendored implementation merely to change repository branding.
 
@@ -72,12 +79,12 @@ in this source draft or its package.
 
 The two-file organization diff was independently reviewed and promoted to main
 at `d019d5a` without forcing. Retain inactive motorcycle history and legacy
-installer identity; do not repeat the rename. Review the ownership-safety candidate
+installer identity; do not repeat the rename. Review the package-provenance candidate
 separately before any further source integration or package publication.
 
 Existing verification commands are `tools/tests/Test-SetupUx.ps1` and
 `tools/tests/Test-InstallPackage.ps1`; they use disposable/synthetic fixtures.
-They are not gameplay or physical force tests. The ownership-safety candidate
+They are not gameplay or physical force tests. The reviewed ownership-safety change
 changes installer/removal checks, not the native runtime or toolkit pin. It
 validates complete prior receipt path/hash sets and recognizes only the exact
 known 0.1.0/0.2.0 proxy hashes without a receipt. Unknown/modified files block upgrades;
