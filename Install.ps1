@@ -6,16 +6,18 @@
     override is supplied. The proxy, external setup tools and wheel profile
     are installed with backups and rollback; another proxy is never replaced.
 #>
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess=$true,ConfirmImpact='Medium')]
 param(
     [ValidateSet('Gravel')][string]$Game,
     [string]$GamePath,
     [ValidateRange(1,65535)][int]$Port = 5300,
     [ValidateSet('fh4','fm7','sled')][string]$Format = 'fh4',
     [string]$Product,
-    [switch]$SkipWheelConfig
+    [switch]$SkipWheelConfig,
+    [Alias('DryRun')][switch]$Check
 )
 $ErrorActionPreference = 'Stop'
+$planOnly = $Check -or $WhatIfPreference
 $root = $PSScriptRoot
 Import-Module (Join-Path $root 'tools\SetupUx.psm1') -Force
 Import-Module (Join-Path $root 'tools\InstallPackage.psm1') -Force
@@ -24,6 +26,7 @@ Import-Module (Join-Path $root 'lib\toolkit\powershell\DbceWheel.psm1') -Force
 function Say($Message) { Write-Host $Message }
 function Fail($Message) { throw $Message }
 Say 'Gravel wheel mod - install / update'
+if ($planOnly) { Say 'Check only: no writes, backups or hardware enumeration. Blocking conflicts are reported as errors.' }
 
 $dll = Join-Path $root 'dist\dinput8.dll'
 if (-not (Test-Path -LiteralPath $dll)) { Fail 'The package is incomplete. Extract the whole ZIP, including dist, and retry.' }
@@ -53,13 +56,8 @@ $checkClosed = {
 & $checkClosed
 
 $destDll = Join-Path $GamePath 'dinput8.dll'
-if (Test-Path -LiteralPath $destDll) {
-    $oldDll = [IO.File]::ReadAllBytes($destDll)
-    if ([Text.Encoding]::ASCII.GetString($oldDll).IndexOf('milestone_mod', [StringComparison]::Ordinal) -lt 0) {
-        Fail 'Another tool owns dinput8.dll here. It was left untouched; this package cannot replace that proxy.'
-    }
-}
-$destIni = Join-Path $GamePath 'milestone_mod.ini'
+$ownership = Get-InstallOwnership $GamePath $gameRoot
+$destIni = Assert-PackagePath (Join-Path $GamePath 'milestone_mod.ini') $gameRoot -FileTarget
 $existing = if (Test-Path -LiteralPath $destIni) { [IO.File]::ReadAllText($destIni) } else { $null }
 $savedProduct = if ($null -ne $existing) { Get-ModSetting $existing 'proxy' 'product' } else { '' }
 $productName = 'Steering wheel'
@@ -70,6 +68,7 @@ if ($Product) {
     if ($savedProduct -notmatch '^[a-fA-F0-9]{8}$') { Fail 'The saved wheel identity needs repair. Existing settings were kept; use an explicit -Product to replace it.' }
     $productKey = $savedProduct
 } else {
+    if ($planOnly) { Fail 'Check mode requires -Product or a valid saved wheel identity; hardware will not be enumerated.' }
     $devices = @(Get-DirectInputDevices | Where-Object { $_.ForceFeedback -and $_.Type -ne 0x15 -and $_.Name -notmatch '(?i)vjoy|vigem|xoutput|vxbox' })
     if ($devices.Count -eq 0) { Fail 'Connect the steering wheel, then retry. An explicit -Product can select a known device identity.' }
     if ($devices.Count -eq 1) { $selected = $devices[0] }
@@ -94,7 +93,7 @@ $entries = @(
     [pscustomobject]@{ Path=$destIni; Bytes=$iniBytes }
 )
 if (-not $SkipWheelConfig) {
-    $wheelConfig = Join-Path $inner 'Config\WindowsNoEditor\WheelConfig.ini'
+    $wheelConfig = Assert-PackagePath (Join-Path $inner 'Config\WindowsNoEditor\WheelConfig.ini') $gameRoot -FileTarget
     if (-not (Test-Path -LiteralPath $wheelConfig)) { Fail 'Gravel WheelConfig.ini was not found. Restore the game file before installing, or explicitly use -SkipWheelConfig.' }
     $wheelText = [IO.File]::ReadAllText($wheelConfig)
     $wheelNew = Add-WheelProfile $wheelText $productKey $productName
@@ -111,13 +110,26 @@ foreach ($relative in $setupFiles) {
 }
 $launcher = Join-Path $gameRoot 'Wheel settings.bat'
 $launchText = "@echo off`r`nREM DBCE Milestone wheel settings`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$setupRoot\WheelSetup.ps1`" -GamePath `"$inner`" -ModConfig `"$destIni`"`r`npause`r`n"
-if ((Test-Path -LiteralPath $launcher) -and ([IO.File]::ReadAllText($launcher) -notlike '*REM DBCE Milestone wheel settings*')) { Fail 'An unrelated Wheel settings.bat already exists. It was kept; rename it before installing.' }
 $launchBytes = [Text.UTF8Encoding]::new($false).GetBytes($launchText)
 $entries += [pscustomobject]@{ Path=$launcher; Bytes=$launchBytes }
 $owned += [pscustomobject]@{ Path=$launcher; Hash=(Get-ByteHash $launchBytes) }
 $version = ([IO.File]::ReadAllText((Join-Path $root 'VERSION'))).Trim()
 $receipt = [pscustomobject]@{ Product='milestone-wheel-tools'; Version=$version; Game='Gravel'; GameRoot=$gameRoot; InstalledUtc=[DateTime]::UtcNow.ToString('o'); OwnedFiles=$owned }
 $entries += [pscustomobject]@{ Path=(Join-Path $GamePath 'milestone_install.json'); Bytes=[Text.UTF8Encoding]::new($false).GetBytes(($receipt | ConvertTo-Json -Depth 6)) }
+foreach ($entry in $entries) {
+    if ($ownership.ContainsKey($entry.Path)) { $entry | Add-Member -NotePropertyName ExpectedHash -NotePropertyValue $ownership[$entry.Path] }
+}
+if ($planOnly) {
+    $plan = @(Get-PackageInstallPlan -Entries $entries -AllowedRoot $gameRoot -BeforeRead $checkClosed)
+    foreach ($item in $plan) { Say "$($item.Action): $($item.Path)" }
+    $overrides=@('Product','Port','Format') | Where-Object { $PSBoundParameters.ContainsKey($_) }
+    Say "Explicit settings overrides: $(if($overrides){$overrides -join ', '}else{'none'})"
+    Say 'Unspecified existing INI settings and existing wheel bindings are preserved.'
+    Say 'Plan only; no files, receipts or backups were written. Re-run the installer without Check/DryRun/WhatIf to apply after revalidation.'
+    [pscustomobject]@{Mode='Check';Game='Gravel';GameRoot=$gameRoot;Product=$productKey;Files=$plan;SettingsOverrides=@($overrides);HardwareEnumerated=$false;WritesPerformed=0}
+    return
+}
+if (-not $PSCmdlet.ShouldProcess($gameRoot,'Install/update the Gravel package with backups and rollback')) { return }
 $backup = Join-Path $GamePath ('DBCE-Wheel-Backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,6))
 $result = Invoke-PackageInstall -Entries $entries -AllowedRoot $gameRoot -BackupRoot $backup -BeforeWrite $checkClosed
 Say "Installed $version. Backups: $($result.BackupRoot)"

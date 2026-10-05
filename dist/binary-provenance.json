@@ -1,0 +1,24 @@
+{
+  "SchemaVersion": 1,
+  "Kind": "retained",
+  "HistoricalSourceEvidenceCommit": "3545810f4fd33647ff19ab87ab02a9aec0afa47a",
+  "Evidence": "Repository dist history and docs/DEPLOYMENT-2026-09-19.md; not a recovered build receipt",
+  "BuildReceipt": null,
+  "Compiler": null,
+  "Toolchain": null,
+  "Reproducibility": "unknown",
+  "Binaries": [
+    {
+      "Path": "dist/dinput8.dll",
+      "SHA256": "4e74d46dcfe100c378de3778f3238d941102689bd9fff348b2cecd335b7e2c30",
+      "GitBlob": "8238fa6650ad107b9ce8fc272ad605cc013bc898",
+      "LastChangedCommit": "3545810f4fd33647ff19ab87ab02a9aec0afa47a"
+    },
+    {
+      "Path": "dist/wheelprobe.exe",
+      "SHA256": "4d9e94cc31f67f9644bfded1847b94810a9f24cbeba9cee01661ebb361c6883a",
+      "GitBlob": "2e0de26f48a0b003103d4f05891cbabd259ac2e5",
+      "LastChangedCommit": "3545810f4fd33647ff19ab87ab02a9aec0afa47a"
+    }
+  ]
+}

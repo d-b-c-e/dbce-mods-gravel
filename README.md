@@ -1,10 +1,11 @@
-# milestone-wheel-tools
+# Gravel mod
 
-**Wheel setup and telemetry for Gravel, with research tools for other Milestone games.**
+**One Gravel package for wheel setup and optional telemetry.**
 
 The supported package makes modern direct-drive wheels selectable in Gravel,
 provides an external control-binding tool, and sends telemetry to compatible
-Forza receivers. Other Milestone titles remain unverified research candidates.
+Forza receivers. Shared Milestone research code and history are retained;
+motorcycle games are inactive and excluded from the active portfolio.
 
 | you want | run |
 |---|---|
@@ -102,9 +103,18 @@ it up with no integration work.
 Verified with a MOZA R12: working speedometer and tachometer in SimHub, with
 speed, RPM, gear, pedals, wheel slip and suspension travel all live.
 
-MXGP, MotoGP, Ride and Supercross are research candidates. Shared engine
-technology does not establish compatible input, reflection or telemetry hooks.
-The installer accepts Gravel only.
+MXGP, MotoGP, Ride and Supercross are inactive historical research targets.
+Their shared code and documentation remain available; this product supports
+Gravel only. Shared engine technology does not establish title compatibility.
+
+The MOZA R12 hardware evidence is dated August 30, 2026. The September 19
+0.2.0 deployment has installer and offline fixture evidence, with a drive and
+physical-force acceptance still pending on that package. Native FFB passes
+through unchanged. Normalized rig FFB, true triples and recorded gameplay
+acceptance are not established by this release.
+
+Repository naming may change during portfolio organization. Existing package,
+configuration, receipt and launcher names remain compatibility contracts.
 
 ## Install
 
@@ -127,6 +137,15 @@ setup files and their hashes are listed in **milestone_install.json**.
 The complete package manifest is required and every payload hash is checked
 before discovery or changes. Source developers must package before installing.
 
+Updates verify existing proxy, setup and launcher files against a validated
+prior install receipt. Unknown or edited files stop the update without replacing
+them. A damaged receipt also stops installation/removal. Without a receipt, only
+the exact known 0.1.0/0.2.0 proxy hashes are recognized; marker text is not ownership.
+Receiptless setup or launcher files are retained and block installation.
+Uninstall keeps edited receipt-owned files and removes only matching files;
+unknown receiptless proxies are left untouched. Keep receipts and backups when
+moving an installation; resolve a refused update before retrying.
+
 Advanced installer switches (ordinary updates keep existing settings):
 
 ```powershell
@@ -135,6 +154,21 @@ Advanced installer switches (ordinary updates keep existing settings):
 .\Install.ps1 -GamePath "D:\...\gravel\Binaries\Win64" # explicit Gravel folder
 .\Install.ps1 -Product 0006346e                   # if it picks the wrong device
 ```
+
+**Check before applying:** run `Install.ps1 -Check` (also `-DryRun` or
+`-WhatIf`) from the complete verified package with Gravel closed. It validates
+the same package, receipt, ownership hashes and target paths, then reports
+Create / Replace / Preserve for each proposed file. Blocking conflicts stop the
+plan with an error. File targets that are directories, and paths containing
+junctions or other reparse points, are rejected before target content is read.
+No settings, receipts or backups are written.
+
+A check uses a valid saved wheel identity or an explicit `-Product`; it never
+enumerates hardware or asks you to choose a device. Use `-GamePath` to select an
+exact folder. Explicit Port/Format/Product overrides are shown in the proposed
+configuration change while other saved settings remain preserved. The plan is
+a point-in-time check, not a write-permission/lock test or an install receipt.
+Re-run without Check/DryRun/WhatIf to apply; ownership and state are revalidated.
 
 The runtime DLL belongs beside `gravel-Win64-Shipping.exe` in
 `Gravel\gravel\Binaries\Win64`; the launcher belongs in `Gravel`.
@@ -237,6 +271,27 @@ later removal fails. If Gravel starts during a transaction, further writes stop
 and the error identifies recovery backups; close the game before recovery.
 
 ## Build
+
+Hosted source checks run only by explicit `workflow_dispatch`; pushes and pull
+requests do not start this workflow. Local builds, package creation and artifact
+upload can proceed separately when authorized, without waiting for Actions minutes.
+
+For the reviewed installer source `3eb31450148665ee1a5526dff0c5ce828068b79f`,
+these commands were run directly in an existing PowerShell 7 (`pwsh`) session
+from the repository root, without changing execution policy:
+
+```powershell
+& .\tools\tests\Test-InstallPackage.ps1  # PASS: 234 install/package checks
+& .\tools\tests\Test-SetupUx.ps1         # PASS: 141 offline UX/migration checks
+```
+
+The local review receipts are `gravel-plan-path-safety-tests-pwsh.log`,
+`gravel-plan-path-safety-setup-pwsh.log` and
+`gravel-install-plan-path-safety-hash-catalog.json` beside the review bundle.
+These are synthetic source checks, not a native build, packaged release or game
+acceptance result. Windows PowerShell 5.1 remains separately unvalidated after
+the scripts-disabled denial; no retry or policy override was performed.
+Installer path validation remains a point-in-time check.
 
 Only needed when working from source. MSYS2 MinGW-w64 GCC 16 is required;
 pass `-Toolchain` to use another bin folder. Build checks x64 format, all six

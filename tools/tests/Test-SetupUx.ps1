@@ -297,7 +297,7 @@ class FixtureProbe {
     Assert ([IO.File]::ReadAllText($config) -ceq $updated) 'Ordinary uninstall must retain personal settings.'
     Assert (@(Get-ChildItem (Join-Path $game 'DBCE-Wheel-Backups') -Directory).Count -eq 3) 'Ordinary uninstall must retain install backups and add a removal backup.'
     [IO.File]::WriteAllText((Join-Path $game 'dinput8.dll'), 'another proxy')
-    & (Join-Path $fixture 'Uninstall.ps1') -GamePath $game
+    Assert-Throws { & (Join-Path $fixture 'Uninstall.ps1') -GamePath $game } 'Unknown receiptless removal must fail closed.'
     Assert ([IO.File]::ReadAllText((Join-Path $game 'dinput8.dll')) -eq 'another proxy') 'Uninstall must preserve another proxy.'
     $freshGame = Join-Path $fixture 'fresh-game'
     [IO.Directory]::CreateDirectory($freshGame) | Out-Null
