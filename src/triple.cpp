@@ -185,29 +185,63 @@ void hookAdjustViewRect(const void *, int pass, int *x, int *, uint32_t *sizeX, 
 }
 
 struct FVectorF { float X, Y, Z; };
+
+// Camera axes of a UE rotator (X forward, Y right, Z up; FRotationMatrix rows), and a turn about the camera's own
+// up axis (yaw, + = right) and right axis (pitch, + = up) composed in the camera frame, back to a rotator as
+// FMatrix::Rotator. Adding to world Euler yaw opened seams when the camera pitched or rolled (Astra's review of the
+// same code in SonicTriple, 2026-10-06).
+void cameraAxes(const FRotatorF &rot, V3 &f, V3 &rt, V3 &u)
+{
+    const double p = rot.Pitch * Pi / 180, y = rot.Yaw * Pi / 180, r = rot.Roll * Pi / 180;
+    const double cp = std::cos(p), sp = std::sin(p), cy = std::cos(y), sy = std::sin(y), cr = std::cos(r), sr = std::sin(r);
+    f = {cp * cy, cp * sy, sp};
+    rt = {sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp};
+    u = {-(cr * sp * cy + sr * sy), cy * sr - cr * sp * sy, cr * cp};
+}
+
+void turnInCameraFrame(FRotatorF &rot, double yawDeg, double pitchUpDeg)
+{
+    V3 f, rt, u;
+    cameraAxes(rot, f, rt, u);
+    if (pitchUpDeg != 0) {
+        const double a = pitchUpDeg * Pi / 180;
+        const V3 f2 = f * std::cos(a) + u * std::sin(a), u2 = u * std::cos(a) - f * std::sin(a);
+        f = f2; u = u2;
+    }
+    if (yawDeg != 0) {
+        const double a = yawDeg * Pi / 180;
+        const V3 f2 = f * std::cos(a) + rt * std::sin(a), r2 = rt * std::cos(a) - f * std::sin(a);
+        f = f2; rt = r2;
+    }
+    const double pitch = std::atan2(f.z, std::sqrt(f.x * f.x + f.y * f.y)), yaw = std::atan2(f.y, f.x);
+    const V3 flatRight{-std::sin(yaw), std::cos(yaw), 0};
+    rot.Pitch = (float)(pitch * 180 / Pi);
+    rot.Yaw = (float)(yaw * 180 / Pi);
+    rot.Roll = (float)(std::atan2(dot(u, flatRight), dot(rt, flatRight)) * 180 / Pi);
+}
+
 void hookViewOffset(void *, int pass, FRotatorF *rotation, float worldToMeters, void *location)
 {
     // The eye stays at the camera (plus the player's camera-key offsets in a race); the side
-    // views turn by their panel's angle.
+    // views turn by their panel's angle, both in the camera's own frame.
     int p = panelOf(pass);
     if (p < 0 || !rotation) return;
+    double tiltUp = 0;
     if (inGameplay()) {
         const CameraOffsets c = cameraNow();
         if (location && (c.x || c.y || c.z)) {
-            // Camera space (UE: X forward, Y right, Z up) from the camera's own yaw and pitch.
-            const double yaw = rotation->Yaw * Pi / 180, pitch = rotation->Pitch * Pi / 180;
-            const double cy = std::cos(yaw), sy = std::sin(yaw), cp = std::cos(pitch), sp = std::sin(pitch);
+            V3 f, rt, u;
+            cameraAxes(*rotation, f, rt, u);
             const double s = worldToMeters > 0 ? worldToMeters : 100;
+            const V3 d = (f * c.x + rt * c.y + u * c.z) * s;
             auto *v = (FVectorF *)location;
-            v->X += (float)(s * (c.x * cp * cy - c.y * sy - c.z * sp * cy));
-            v->Y += (float)(s * (c.x * cp * sy + c.y * cy - c.z * sp * sy));
-            v->Z += (float)(s * (c.x * sp + c.z * cp));
+            v->X += (float)d.x; v->Y += (float)d.y; v->Z += (float)d.z;
         }
-        rotation->Pitch -= c.tilt;            // tilt down = look down
+        tiltUp = -c.tilt;                     // tilt down = look down
     }
-    rotation->Yaw += (float)panelFor(p).yaw;
+    const double yaw = panelFor(p).yaw;
+    if (yaw != 0 || tiltUp != 0) turnInCameraFrame(*rotation, yaw, tiltUp);
 }
-
 FMatrixF *hookProjection(const void *self, FMatrixF *out, int pass, float fov)
 {
     // The stock function gives the engine's near plane (M[3][2]) for a non-mono pass.
@@ -573,13 +607,13 @@ HRESULT WINAPI hookCreateFactory1(REFIID riid, void **factory) { return wrapFact
 std::atomic<int> g_modeLogs{0};
 LONG WINAPI hookChangeDisplaySettingsW(DEVMODEW *mode, DWORD flags)
 {
-    if (!mode) return ChangeDisplaySettingsW(nullptr, flags);   // "restore the registry mode"
+    if (!mode) return DISP_CHANGE_SUCCESSFUL;   // "apply the registry settings" is a display change too: refused
     if (g_modeLogs++ < 8) logf("[triple] refused display mode change %lux%lu (flags %lx)", mode->dmPelsWidth, mode->dmPelsHeight, flags);
     return DISP_CHANGE_FAILED;
 }
 LONG WINAPI hookChangeDisplaySettingsExW(LPCWSTR device, DEVMODEW *mode, HWND hwnd, DWORD flags, LPVOID param)
 {
-    if (!mode) return ChangeDisplaySettingsExW(device, nullptr, hwnd, flags, param);
+    if (!mode) return DISP_CHANGE_SUCCESSFUL;
     if (g_modeLogs++ < 8) logf("[triple] refused display mode change %lux%lu on %ls (flags %lx)", mode->dmPelsWidth, mode->dmPelsHeight, device ? device : L"primary", flags);
     return DISP_CHANGE_FAILED;
 }
