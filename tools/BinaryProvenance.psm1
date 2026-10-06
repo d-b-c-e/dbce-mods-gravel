@@ -15,11 +15,11 @@ function Read-RetainedBinaryProvenance([string]$Root) {
 
 function Assert-RetainedBinaryProvenance([string]$Root, [object]$Provenance) {
     $origin = '3545810f4fd33647ff19ab87ab02a9aec0afa47a'
-    $evidence = 'wheelprobe.exe: repository dist history and docs/DEPLOYMENT-2026-09-19.md; dinput8.dll: build.ps1 observed build of f3f7fcb (2026-10-06, local receipt); not a committed build receipt'
+    $evidence = 'wheelprobe.exe: repository dist history and docs/DEPLOYMENT-2026-09-19.md; dinput8.dll: build.ps1 observed build of 4b7fd75 (2026-10-06, local receipt); not a committed build receipt'
     # Reviewed public artifact identities, not inferred build/compiler attestation.
     $catalog = @{
-        # 2026-10-06: triple screens + camera keys; observed build of f3f7fcb adopted (docs/TRIPLES.md).
-        'dist/dinput8.dll' = @('f41eb1e4a4a99a1e2acbf1c3a967e2b36a3a0ce1276e36abe11cef4bf6c5ed3f','95f17215395f8166b7fed7a36cf2b2991643db88','6166d21f508a6b9ee493e99ccec820c5f2fec663')
+        # 2026-10-06: triple screens + camera keys; observed build of 4b7fd75 adopted (docs/TRIPLES.md).
+        'dist/dinput8.dll' = @('d39ff1b8d4946cb145862350dfd89b1c571c9c29bbb7f4b68a178af3543f042b','e3ce6095f23533af248a359659f0860179c2f1c0','75e48823fb77a63b0dc5ba8045c26f34c6085ca2')
         'dist/wheelprobe.exe' = @('4d9e94cc31f67f9644bfded1847b94810a9f24cbeba9cee01661ebb361c6883a','2e0de26f48a0b003103d4f05891cbabd259ac2e5',$origin)
     }
     $fields = @('SchemaVersion','Kind','HistoricalSourceEvidenceCommit','Evidence','BuildReceipt','Compiler','Toolchain','Reproducibility','Binaries')

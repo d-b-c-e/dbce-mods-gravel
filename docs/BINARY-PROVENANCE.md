@@ -6,15 +6,15 @@ compiler origin of copied native binaries. `SourceCommit` retains its historical
 field name; `PackagingSourceCommit` explicitly states that same packaging identity.
 
 2026-10-06: `dist/dinput8.dll` was rebuilt with triple screens and camera keys (docs/TRIPLES.md). The current
-bytes are a `build.ps1` observed build of clean source `f3f7fcb` (MSYS2 GCC 16.2.0; the receipt stays local in
-ignored `build/`), committed in `6166d21` and adopted into the catalog in `tools/BinaryProvenance.psm1` (the first
+bytes are a `build.ps1` observed build of clean source `4b7fd75` (MSYS2 GCC 16.2.0; the receipt stays local in
+ignored `build/`), committed in `75e4882` and adopted into the catalog in `tools/BinaryProvenance.psm1` (the first
 triple build was `1d3d1e1`, committed in `f96fe25`). `dist/wheelprobe.exe` is unchanged.
 The 0.2.0 binaries were retained artifacts, last changed together at
 `3545810f4fd33647ff19ab87ab02a9aec0afa47a` on September 19, 2026:
 
 | Path | SHA-256 | Git blob at the last-change commit |
 |---|---|---|
-| dist/dinput8.dll | f41eb1e4a4a99a1e2acbf1c3a967e2b36a3a0ce1276e36abe11cef4bf6c5ed3f | 95f17215395f8166b7fed7a36cf2b2991643db88 (at 6166d21) |
+| dist/dinput8.dll | d39ff1b8d4946cb145862350dfd89b1c571c9c29bbb7f4b68a178af3543f042b | e3ce6095f23533af248a359659f0860179c2f1c0 (at 75e4882) |
 | dist/wheelprobe.exe | 4d9e94cc31f67f9644bfded1847b94810a9f24cbeba9cee01661ebb361c6883a | 2e0de26f48a0b003103d4f05891cbabd259ac2e5 |
 
 Repository history and `DEPLOYMENT-2026-09-19.md` associate those artifacts with
