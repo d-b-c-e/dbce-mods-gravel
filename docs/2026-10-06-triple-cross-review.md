@@ -103,3 +103,46 @@ of the UDP output switch.
 The accepted install is left in place. No repeated runtime test is requested
 until there is a concrete corrected candidate; preserve owner saves and the
 usual idle/lease boundaries on its next necessary check.
+
+## Corrected geometry/reset review — 2026-10-06, 17:12 CT
+
+Claude's **4b7fd75** closes findings 1 and 2 in source. Independent MSVC x64
+execution extracts the actual cameraAxes, turnInCameraFrame, hookViewOffset,
+computePanels/panelFor and display hooks, with fake external boundaries. With
+20,006 pitch/yaw/roll poses, +/-8-degree camera tilt and nonzero seat offsets,
+120,036 left/right top/middle/bottom edge pairs have maximum unit-ray difference
+`3.632e-7` (float rotator) and identical eye positions across all panels. Zero
+bezel isolates shared edge rays. Both display hooks forward zero null/non-null
+requests with flags 0, CDS_TEST, CDS_RESET and CDS_FULLSCREEN. These checks do not
+call Windows display APIs or a game/device. Renderer-specific hooks remain here;
+the basis/edge-ray contract is reusable.
+
+Inspected `build/triple-test-frame/f1-tilt8.png`: cockpit race with centred HUD
+and continuous barrier/ground presentation across the thirds. This supports
+Claude's 8-degree tilt observation; it is not physical owner acceptance or a
+recorded trajectory. The retained watchdog reports game closure at 17:03:53;
+a separate numeric exit receipt was not supplied. Current installed receipt at
+22:05:15Z has **14/14 matching files**, dinput8 SHA-256
+`D39FF1B8D4946CB145862350DFD89B1C571C9C29BBB7F4B68A178AF3543F042B`.
+The dist provenance catalogue associates it with source 4b7fd75, adopted at
+4dc9df7; this readback does not independently reconstruct that build.
+Receipt SHA-256: `BD419D3F1258F4FC1AD65DB686BF0DD75B22C123B8778997E710A45391B4E54C`.
+
+Findings **3 and 4 remain open** on this source: `inGameplay` still returns true
+when telemetry is off, and `proxyInit` starts the UE observation thread only with
+telemetry enabled; an existing ResX still makes spanWindow false and suppresses
+the maintenance thread. Keep the observer independent of output, and separate
+missing-argument insertion from worker eligibility. Neither fix was claimed by
+Claude in this handoff. No speculative runtime change or new launch here.
+
+Forty-eight shared Sonic/Gravel review files (actual source, standalone compiled
+fixture, installed receipts/payloads, this race's frames/log/watchdog and readback)
+are preserved at `%LOCALAPPDATA%/Dbce/StagePlayback/SessionEvidence/sonic-gravel-fixed-review-20261006`.
+Manifest SHA-256: `187563DEA33D0DDCCFD19FB8F8781B5A46880CFB9D92162D247A2D0B6C0C1AA1`.
+Run `fixture/compile-msvc.cmd` from that folder to rerun the inert standalone test.
+Sonic's review describes its additional DXGI local-copy/factory2 checks; its guard
+remains off. Original reports/archives above remain historical evidence.
+
+All 20 toolkit rows are now represented. STD-001/003/004/009/016-018 remain
+unchecked; STD-012 pending; STD-005/006/013/015/019/020 partial. The two unresolved
+renderer edge cases are explicit in adoption rather than implied passed.
