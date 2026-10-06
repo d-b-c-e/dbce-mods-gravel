@@ -7,6 +7,7 @@
 //   fmod_tap.cpp   hooks FMOD Studio setParameterValue   -> FmodState
 //   ue4.cpp        reads live vehicle values through UE4 reflection -> Ue4State
 //   telemetry.cpp  60 Hz thread folding all of it into Forza "Data Out" UDP
+//   triple.cpp     triple screens through the engine's emulated stereo device
 //
 // Everything a game can read is left untouched except dwDevType. All taps are
 // observe-only.
@@ -142,6 +143,8 @@ void fmodTapInstall();     // delay-load IAT hook
 void ue4Init();            // start discovery (idempotent)
 bool ue4Poll();            // refresh g_ue4; returns live
 void telemetryStart();     // spawn the sender thread
+void tripleAttach();       // DllMain: three projected views via emulated stereo (triple.cpp)
+void tripleReport();       // log what tripleAttach did, once logging is configured
 
 // Safe read of this process's memory; false on unmapped pages instead of AV.
 bool safeRead(const void *addr, void *out, size_t n);

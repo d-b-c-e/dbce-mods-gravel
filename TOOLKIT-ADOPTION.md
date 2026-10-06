@@ -14,7 +14,9 @@ Seeded 2026-10-04 from what was verified that day; `unchecked` rows need a look.
 | STD-004 | Consistent settings UX | unchecked |  |
 | STD-005 | Camera numpad layout 8/2 9/3 4/6 7/1 +/- 5 | unchecked |  |
 | STD-006 | Camera step sizes are settings | unchecked |  |
-| STD-007 | Triple screens in one wide window | unchecked |  |
-| STD-008 | Display changes: game applies once | unchecked |  |
+| STD-007 | Triple screens in one wide window | adopted | 2026-10-06 emulated-stereo triples (`src/triple.cpp`, docs/TRIPLES.md): centre = game camera, sides at the panel angle, off-axis; HUD and menus on the centre. Owner rig check pending. |
+| STD-008 | Display changes: game applies once | adopted | On a triple layout every resolution request becomes the layout's size; exclusive fullscreen and ChangeDisplaySettings mode changes are refused. |
 | STD-009 | Dashboard telemetry matches the HUD | unchecked |  |
 | STD-010 | Install the latest build for testing | unchecked |  |
+| STD-015 | Triples on Surround and on separate monitors | partial | Separate monitors seen (borderless span over the "Sim Racing" layout); Surround path built, not run. |
+| STD-019 | Menus on the centre screen; side screens only in gameplay | adopted | Front end, loading and pause menu on the centre; sides black outside a race. |

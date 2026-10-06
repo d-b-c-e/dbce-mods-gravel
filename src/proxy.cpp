@@ -415,6 +415,7 @@ void proxyInit()
     if (g_inited.exchange(true)) return;
     InitializeCriticalSection(&g_devLock);
     loadConfig();
+    tripleReport();
     char sys[MAX_PATH];
     GetSystemDirectoryA(sys, MAX_PATH);
     strcat(sys, "\\dinput8.dll");
@@ -457,9 +458,12 @@ FWD(DllRegisterServer, HRESULT, (void), (), E_FAIL)
 FWD(DllUnregisterServer, HRESULT, (void), (), E_FAIL)
 FWD(GetdfDIJoystick, LPCDIDATAFORMAT, (void), (), nullptr)
 
-BOOL WINAPI DllMain(HINSTANCE, DWORD, LPVOID)
+BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID)
 {
     // Everything is deferred to the first exported call - LoadLibrary and
     // thread creation inside the loader lock are deadlocks waiting to happen.
+    // Triples are the exception: they must answer the game's command line before its
+    // entry point runs, and only write memory here (see triple.cpp).
+    if (reason == DLL_PROCESS_ATTACH) tripleAttach();
     return TRUE;
 }

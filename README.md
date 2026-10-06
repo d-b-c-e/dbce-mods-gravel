@@ -87,6 +87,15 @@ slip, suspension travel, engine torque, brake load and collisions, all per
 frame. That is far better material for a bass shaker than anything inferred
 from force feedback.
 
+**5. Triple screens.**
+On three monitors (Surround, or three separate screens side by side) the game
+renders three projected views in one window: the game camera on the centre
+screen, the side screens continuing it at your rig's panel angle. Menus and the
+HUD stay on the centre screen; the side screens are black outside a race. It
+uses the engine's own stereo renderer, switches on by itself on a three-wide
+layout, and never changes a display mode. Settings: `[triple]` in
+`milestone_mod.ini`.
+→ [docs/TRIPLES.md](docs/TRIPLES.md)
 All of it goes out as **Forza "Data Out"** UDP — the most widely parsed
 telemetry format there is — so SimHub, ShakeIt, dashboards and motion rigs pick
 it up with no integration work.
@@ -94,9 +103,9 @@ it up with no integration work.
 
 ## Status
 
-| game | engine | wheel fix | inputs | FFB | physics | dash | impacts |
-|---|---|---|---|---|---|---|---|
-| **Gravel** | UE 4.17 | ✅ | ✅ | ✅ | ✅ | ✅ | 🔧 |
+| game | engine | wheel fix | inputs | FFB | physics | dash | impacts | triples |
+|---|---|---|---|---|---|---|---|---|
+| **Gravel** | UE 4.17 | ✅ | ✅ | ✅ | ✅ | ✅ | 🔧 | 🔧 |
 
 ✅ verified on hardware · 🔧 implemented, being validated · ▫ untested
 
@@ -110,8 +119,9 @@ Gravel only. Shared engine technology does not establish title compatibility.
 The MOZA R12 hardware evidence is dated August 30, 2026. The September 19
 0.2.0 deployment has installer and offline fixture evidence, with a drive and
 physical-force acceptance still pending on that package. Native FFB passes
-through unchanged. Normalized rig FFB, true triples and recorded gameplay
-acceptance are not established by this release.
+through unchanged. Normalized rig FFB and recorded gameplay acceptance are not
+established by this release. Triple screens (2026-10-06) were seen in an offline
+race on three separate monitors in unattended tests; the owner's rig check is next.
 
 Repository naming may change during portfolio organization. Existing package,
 configuration, receipt and launcher names remain compatibility contracts.
