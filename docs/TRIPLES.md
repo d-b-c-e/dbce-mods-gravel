@@ -85,9 +85,13 @@ Every code pattern must match exactly once in the running exe, or nothing is pat
 Installed 2026-10-06 05:50 with the packaged installer (`167b6cc`, dinput8.dll `ecddaafb`); a plain Steam
 launch then came up in triple mode with the menu on the centre screen and black sides.
 
+**Surround (05:58-06:01):** profile `Sim Racing Surround` applied through the switcher CLI (verified, 35 s settle),
+the installed build from a plain Steam launch: race in three projected views with the HUD on the centre, front-end
+menus centre-only; the exclusive-fullscreen request was refused there too (windowed fullscreen at 7680x1440). Back
+on `Sim Racing` afterwards (verified).
+
 ## Open
 
 - Owner check at the rig: side angle and FOV feel, chase cameras, brightness of the side views
   (each view has its own exposure history), whether loading-screen transitions flash.
-- Surround path not run yet (the owner's everyday layout is separate monitors).
 - Fades and full-screen UI effects that span the window are drawn on the centre only.

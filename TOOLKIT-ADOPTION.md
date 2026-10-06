@@ -18,5 +18,5 @@ Seeded 2026-10-04 from what was verified that day; `unchecked` rows need a look.
 | STD-008 | Display changes: game applies once | adopted | On a triple layout every resolution request becomes the layout's size; exclusive fullscreen and ChangeDisplaySettings mode changes are refused. |
 | STD-009 | Dashboard telemetry matches the HUD | unchecked |  |
 | STD-010 | Install the latest build for testing | unchecked |  |
-| STD-015 | Triples on Surround and on separate monitors | partial | Separate monitors seen (borderless span over the "Sim Racing" layout); Surround path built, not run. |
+| STD-015 | Triples on Surround and on separate monitors | adopted | Both seen unattended 2026-10-06: borderless span over "Sim Racing" and windowed fullscreen on "Sim Racing Surround". Owner rig check pending. |
 | STD-019 | Menus on the centre screen; side screens only in gameplay | adopted | Front end, loading and pause menu on the centre; sides black outside a race. |
