@@ -152,6 +152,23 @@ bool inGameplay()
     return g_ue4.live.load();
 }
 
+// ------------------------------------------------------------- camera keys
+// STD-005/006: numpad 8/2 forward/back, 9/3 up/down, 4/6 left/right, 7/1 tilt down/up,
+// +/- FOV, 5 reset; steps 0.02 m, 1 deg, 2 deg ([camera] in milestone_mod.ini). Offsets move
+// the eye of all three views together, in a race only, and are saved in the INI.
+struct CameraOffsets { float x = 0, y = 0, z = 0, tilt = 0, fov = 0; };
+CameraOffsets g_cam;                        // read on the render path, written by cameraThread
+SRWLOCK g_camLock = SRWLOCK_INIT;
+float g_moveStep = 0.02f, g_tiltStep = 1.f, g_fovStep = 2.f;
+
+CameraOffsets cameraNow()
+{
+    AcquireSRWLockShared(&g_camLock);
+    CameraOffsets c = g_cam;
+    ReleaseSRWLockShared(&g_camLock);
+    return c;
+}
+
 // ---------------------------------------------------------- device hooks
 void hookAdjustViewRect(const void *, int pass, int *x, int *, uint32_t *sizeX, uint32_t *sizeY)
 {
@@ -167,11 +184,27 @@ void hookAdjustViewRect(const void *, int pass, int *x, int *, uint32_t *sizeX, 
     *sizeX = third;
 }
 
-void hookViewOffset(void *, int pass, FRotatorF *rotation, float, void *)
+struct FVectorF { float X, Y, Z; };
+void hookViewOffset(void *, int pass, FRotatorF *rotation, float worldToMeters, void *location)
 {
-    // The eye stays at the camera; the side views turn by their panel's angle.
+    // The eye stays at the camera (plus the player's camera-key offsets in a race); the side
+    // views turn by their panel's angle.
     int p = panelOf(pass);
     if (p < 0 || !rotation) return;
+    if (inGameplay()) {
+        const CameraOffsets c = cameraNow();
+        if (location && (c.x || c.y || c.z)) {
+            // Camera space (UE: X forward, Y right, Z up) from the camera's own yaw and pitch.
+            const double yaw = rotation->Yaw * Pi / 180, pitch = rotation->Pitch * Pi / 180;
+            const double cy = std::cos(yaw), sy = std::sin(yaw), cp = std::cos(pitch), sp = std::sin(pitch);
+            const double s = worldToMeters > 0 ? worldToMeters : 100;
+            auto *v = (FVectorF *)location;
+            v->X += (float)(s * (c.x * cp * cy - c.y * sy - c.z * sp * cy));
+            v->Y += (float)(s * (c.x * cp * sy + c.y * cy - c.z * sp * sy));
+            v->Z += (float)(s * (c.x * sp + c.z * cp));
+        }
+        rotation->Pitch -= c.tilt;            // tilt down = look down
+    }
     rotation->Yaw += (float)panelFor(p).yaw;
 }
 
@@ -182,6 +215,7 @@ FMatrixF *hookProjection(const void *self, FMatrixF *out, int pass, float fov)
     float nearZ = out->M[3][2];
     int p = panelOf(pass);
     if (p < 0) return out;
+    if (inGameplay()) fov = std::min(120.f, std::max(20.f, fov + cameraNow().fov));
     if (std::fabs(fov - g_panelFov.load()) > 0.01f) computePanels(fov);
     Frustum f = panelFor(p);
     FMatrixF m{};
@@ -591,6 +625,93 @@ DWORD WINAPI spanThread(LPVOID)
     return 0;
 }
 
+// ------------------------------------------------------- camera key thread
+// Numpad keys while the game window is in front (GetAsyncKeyState edges, auto-repeat after
+// 400 ms), plus a dev command file beside the exe for unattended tests: dbce-camera-cmd.txt,
+// one "forward|back|up|down|left|right|tiltdown|tiltup|wider|narrower|reset [count]" per line,
+// consumed and deleted. Changes are saved to [camera] 2 s after the last one.
+enum CamAction { CamForward, CamBack, CamUp, CamDown, CamLeft, CamRight, CamTiltDown, CamTiltUp, CamWider, CamNarrower, CamReset, CamCount };
+const int g_camKeys[CamCount] = {VK_NUMPAD8, VK_NUMPAD2, VK_NUMPAD9, VK_NUMPAD3, VK_NUMPAD4, VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD1, VK_ADD, VK_SUBTRACT, VK_NUMPAD5};
+const char *g_camNames[CamCount] = {"forward", "back", "up", "down", "left", "right", "tiltdown", "tiltup", "wider", "narrower", "reset"};
+
+void applyCamera(int action, int count)
+{
+    AcquireSRWLockExclusive(&g_camLock);
+    CameraOffsets &c = g_cam;
+    for (int i = 0; i < count; ++i) {
+        switch (action) {
+        case CamForward: c.x += g_moveStep; break;
+        case CamBack: c.x -= g_moveStep; break;
+        case CamUp: c.z += g_moveStep; break;
+        case CamDown: c.z -= g_moveStep; break;
+        case CamLeft: c.y -= g_moveStep; break;
+        case CamRight: c.y += g_moveStep; break;
+        case CamTiltDown: c.tilt += g_tiltStep; break;
+        case CamTiltUp: c.tilt -= g_tiltStep; break;
+        case CamWider: c.fov += g_fovStep; break;
+        case CamNarrower: c.fov -= g_fovStep; break;
+        case CamReset: c = CameraOffsets{}; break;
+        }
+    }
+    c.x = std::max(-1.f, std::min(1.f, c.x)); c.y = std::max(-1.f, std::min(1.f, c.y)); c.z = std::max(-1.f, std::min(1.f, c.z));
+    c.tilt = std::max(-30.f, std::min(30.f, c.tilt)); c.fov = std::max(-40.f, std::min(40.f, c.fov));
+    ReleaseSRWLockExclusive(&g_camLock);
+}
+
+void saveCamera()
+{
+    char ini[MAX_PATH]; sidecarPath(ini, "milestone_mod.ini");
+    const CameraOffsets c = cameraNow();
+    char b[32];
+    snprintf(b, sizeof b, "%.3f", c.x); WritePrivateProfileStringA("camera", "forward_m", b, ini);
+    snprintf(b, sizeof b, "%.3f", c.y); WritePrivateProfileStringA("camera", "right_m", b, ini);
+    snprintf(b, sizeof b, "%.3f", c.z); WritePrivateProfileStringA("camera", "up_m", b, ini);
+    snprintf(b, sizeof b, "%.1f", c.tilt); WritePrivateProfileStringA("camera", "tilt_down_deg", b, ini);
+    snprintf(b, sizeof b, "%.1f", c.fov); WritePrivateProfileStringA("camera", "fov_offset_deg", b, ini);
+    logf("[camera] saved forward %.2f right %.2f up %.2f m, tilt %.1f, fov %+.1f", c.x, c.y, c.z, c.tilt, c.fov);
+}
+
+bool gameInFront()
+{
+    DWORD pid = 0;
+    HWND h = GetForegroundWindow();
+    return h && GetWindowThreadProcessId(h, &pid) && pid == GetCurrentProcessId();
+}
+
+DWORD WINAPI cameraThread(LPVOID)
+{
+    char cmdPath[MAX_PATH]; sidecarPath(cmdPath, "dbce-camera-cmd.txt");
+    ULONGLONG down[CamCount] = {}, saveAt = 0;
+    for (;;) {
+        Sleep(30);
+        const ULONGLONG now = GetTickCount64();
+        bool changed = false;
+        if (gameInFront() && inGameplay()) {
+            for (int a = 0; a < CamCount; ++a) {
+                const bool held = (GetAsyncKeyState(g_camKeys[a]) & 0x8000) != 0;
+                if (!held) { down[a] = 0; continue; }
+                if (!down[a]) { down[a] = now; applyCamera(a, 1); changed = true; }
+                else if (a != CamReset && now - down[a] > 400) { applyCamera(a, 1); changed = true; down[a] = now - 340; }
+            }
+        }
+        if (GetFileAttributesA(cmdPath) != INVALID_FILE_ATTRIBUTES) {
+            if (FILE *f = fopen(cmdPath, "r")) {
+                char line[96];
+                while (fgets(line, sizeof line, f)) {
+                    char word[32] = ""; int count = 1;
+                    if (sscanf(line, "%31s %d", word, &count) < 1) continue;
+                    for (int a = 0; a < CamCount; ++a)
+                        if (!_stricmp(word, g_camNames[a])) { applyCamera(a, std::max(1, std::min(100, count))); changed = true; logf("[camera] command %s %d", word, count); }
+                }
+                fclose(f);
+            }
+            DeleteFileA(cmdPath);
+        }
+        if (changed) saveAt = now + 2000;
+        if (saveAt && now >= saveAt) { saveAt = 0; saveCamera(); }
+    }
+}
+
 // ---------------------------------------------------------------- config
 void readTripleConfig()
 {
@@ -616,6 +737,13 @@ void readTripleConfig()
     g_tc.span = num("span_window", 1) != 0;
     g_tc.uiCentre = num("ui_centre", 1) != 0;
     g_tc.menuSidesBlack = num("menu_sides_black", 1) != 0;
+    auto cam = [&](const char *key, double def) {
+        char b[32] = ""; GetPrivateProfileStringA("camera", key, "", b, sizeof b, ini);
+        return b[0] ? (float)atof(b) : (float)def;
+    };
+    g_moveStep = cam("move_step_m", 0.02); g_tiltStep = cam("tilt_step_deg", 1); g_fovStep = cam("fov_step_deg", 2);
+    g_cam.x = cam("forward_m", 0); g_cam.y = cam("right_m", 0); g_cam.z = cam("up_m", 0);
+    g_cam.tilt = cam("tilt_down_deg", 0); g_cam.fov = cam("fov_offset_deg", 0);
 }
 
 } // namespace
@@ -677,6 +805,7 @@ void tripleAttach()
         early("[triple] monitor hooks failed");
     g_active = true;
     computePanels(90.f);
+    CreateThread(nullptr, 0, cameraThread, nullptr, 0, nullptr);
     if (spanWindow) CreateThread(nullptr, 0, spanThread, nullptr, 0, nullptr);
 }
 
@@ -698,5 +827,6 @@ void tripleReport()
          g_layout.span.right - g_layout.span.left, g_layout.span.bottom - g_layout.span.top,
          g_tc.centre, g_tc.right, g_tc.left, g_tc.fov == FovSource::Game ? "game" : "rig", g_tc.panelW, g_tc.panelH, g_tc.side, g_tc.bezel);
     logf("[triple] ui %s; menus %s", g_origArrange ? "on the centre screen" : "across the window (stock)", g_tc.menuSidesBlack ? "centre only (sides black outside gameplay)" : "three views");
+    { const CameraOffsets c = cameraNow(); logf("[camera] numpad keys in a race; offsets forward %.2f right %.2f up %.2f m, tilt %.1f, fov %+.1f; steps %.3f m, %.1f, %.1f deg", c.x, c.y, c.z, c.tilt, c.fov, g_moveStep, g_tiltStep, g_fovStep); }
     logf("[triple] at fov 90: centre l%.3f r%.3f b%.3f t%.3f; right yaw %.1f l%.3f r%.3f", c.l, c.r, c.b, c.t, r.yaw, r.l, r.r);
 }

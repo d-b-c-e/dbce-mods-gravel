@@ -59,6 +59,16 @@ runs from `DllMain` before the game's entry point and only writes memory:
 Every code pattern must match exactly once in the running exe, or nothing is patched and
 `milestone_mod.log` says which (`[triple]` lines).
 
+## Camera keys (STD-005/006)
+
+In a race on a triple layout, with the game in front: numpad 8/2 forward/back, 9/3 up/down, 4/6 left/right,
+7/1 tilt down/up, +/- field of view, 5 reset. Steps 0.02 m, 1 deg, 2 deg (`[camera]` `move_step_m`,
+`tilt_step_deg`, `fov_step_deg`). The offsets move the eye of all three views together (in the camera's own axes)
+and are saved in `[camera]` 2 s after the last change. They apply to whichever camera is active. For unattended
+tests the same actions can be written to `dbce-camera-cmd.txt` beside the exe (`forward 10`, `tiltdown 5`,
+`wider 5`, `reset`; consumed and deleted). Seen 2026-10-06 06:14: forward 20 cm, tilt 5 deg and FOV +10 moved all
+three views together; reset returned to stock.
+
 ## Settings (`[triple]` in milestone_mod.ini)
 
 | key | default | |
