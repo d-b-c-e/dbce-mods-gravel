@@ -15,16 +15,18 @@ function Read-RetainedBinaryProvenance([string]$Root) {
 
 function Assert-RetainedBinaryProvenance([string]$Root, [object]$Provenance) {
     $origin = '3545810f4fd33647ff19ab87ab02a9aec0afa47a'
+    $evidence = 'wheelprobe.exe: repository dist history and docs/DEPLOYMENT-2026-09-19.md; dinput8.dll: build.ps1 observed build of 1d3d1e1 (2026-10-06, local receipt); not a committed build receipt'
     # Reviewed public artifact identities, not inferred build/compiler attestation.
     $catalog = @{
-        'dist/dinput8.dll' = @('4e74d46dcfe100c378de3778f3238d941102689bd9fff348b2cecd335b7e2c30','8238fa6650ad107b9ce8fc272ad605cc013bc898')
-        'dist/wheelprobe.exe' = @('4d9e94cc31f67f9644bfded1847b94810a9f24cbeba9cee01661ebb361c6883a','2e0de26f48a0b003103d4f05891cbabd259ac2e5')
+        # 2026-10-06: triple screens; observed build of 1d3d1e1 adopted (docs/TRIPLES.md).
+        'dist/dinput8.dll' = @('ecddaafbbec60f2ed8d89e46a9b6151d66dced2162f7ceef4a81bb9902c56cdf','963efac9f9942f7317a50900d8ca000c3ee9a8eb','f96fe259218cd809060fa2fcbc1825c3026ae27b')
+        'dist/wheelprobe.exe' = @('4d9e94cc31f67f9644bfded1847b94810a9f24cbeba9cee01661ebb361c6883a','2e0de26f48a0b003103d4f05891cbabd259ac2e5',$origin)
     }
     $fields = @('SchemaVersion','Kind','HistoricalSourceEvidenceCommit','Evidence','BuildReceipt','Compiler','Toolchain','Reproducibility','Binaries')
     if ($null -eq $Provenance -or @(Compare-Object @($Provenance.PSObject.Properties.Name) $fields).Count) { throw 'Binary provenance schema fields are invalid.' }
     if ($null -eq $Provenance -or $Provenance.SchemaVersion -ne 1 -or $Provenance.Kind -cne 'retained' -or
         $Provenance.HistoricalSourceEvidenceCommit -cne $origin -or
-        $Provenance.Evidence -cne 'Repository dist history and docs/DEPLOYMENT-2026-09-19.md; not a recovered build receipt' -or
+        $Provenance.Evidence -cne $evidence -or
         $null -ne $Provenance.BuildReceipt -or $null -ne $Provenance.Compiler -or $null -ne $Provenance.Toolchain -or
         $Provenance.Reproducibility -cne 'unknown') { throw 'Retained binary provenance identity/claims are invalid; no fresh-build claim is supported.' }
     $entries = @($Provenance.Binaries)
@@ -35,7 +37,7 @@ function Assert-RetainedBinaryProvenance([string]$Root, [object]$Provenance) {
         if ($item.Path -cnotin @($catalog.Keys) -or $seen.ContainsKey($item.Path)) { throw 'Unexpected or duplicate provenance path.' }
         $seen[$item.Path] = $true
         if ($item.SHA256 -cne $catalog[$item.Path][0] -or $item.GitBlob -cne $catalog[$item.Path][1] -or
-            $item.LastChangedCommit -cne $origin) { throw 'Binary hash/history provenance mismatch.' }
+            $item.LastChangedCommit -cne $catalog[$item.Path][2]) { throw 'Binary hash/history provenance mismatch.' }
         $path = Join-Path $Root $item.Path
         if (-not [IO.File]::Exists($path) -or (Get-ProvenanceHash $path) -cne $item.SHA256) { throw "Retained binary bytes mismatch: $($item.Path)" }
     }

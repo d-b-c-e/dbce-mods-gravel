@@ -2,7 +2,7 @@
   "SchemaVersion": 1,
   "Kind": "retained",
   "HistoricalSourceEvidenceCommit": "3545810f4fd33647ff19ab87ab02a9aec0afa47a",
-  "Evidence": "Repository dist history and docs/DEPLOYMENT-2026-09-19.md; not a recovered build receipt",
+  "Evidence": "wheelprobe.exe: repository dist history and docs/DEPLOYMENT-2026-09-19.md; dinput8.dll: build.ps1 observed build of 1d3d1e1 (2026-10-06, local receipt); not a committed build receipt",
   "BuildReceipt": null,
   "Compiler": null,
   "Toolchain": null,
@@ -10,9 +10,9 @@
   "Binaries": [
     {
       "Path": "dist/dinput8.dll",
-      "SHA256": "4e74d46dcfe100c378de3778f3238d941102689bd9fff348b2cecd335b7e2c30",
-      "GitBlob": "8238fa6650ad107b9ce8fc272ad605cc013bc898",
-      "LastChangedCommit": "3545810f4fd33647ff19ab87ab02a9aec0afa47a"
+      "SHA256": "ecddaafbbec60f2ed8d89e46a9b6151d66dced2162f7ceef4a81bb9902c56cdf",
+      "GitBlob": "963efac9f9942f7317a50900d8ca000c3ee9a8eb",
+      "LastChangedCommit": "f96fe259218cd809060fa2fcbc1825c3026ae27b"
     },
     {
       "Path": "dist/wheelprobe.exe",

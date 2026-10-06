@@ -347,13 +347,21 @@ try {
     Assert ([IO.File]::ReadAllText($modified).EndsWith('owner note')) 'Uninstall deleted an edited setup file.'
     Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($ini))) -eq $iniHash) 'Uninstall changed owner INI.'
     Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($wheel))) -eq $wheelHash) 'Uninstall changed owner profile.'
+    # A receiptless install is the public 0.2.0 proxy (dist/dinput8.dll at 3545810f, blob 8238fa66), read
+    # from git: the current dist binary has always been installed with a receipt.
+    $git = [Diagnostics.ProcessStartInfo]::new('git', "-C `"$sourceRoot`" cat-file blob 8238fa6650ad107b9ce8fc272ad605cc013bc898")
+    $git.RedirectStandardOutput = $true; $git.UseShellExecute = $false
+    $gitProcess = [Diagnostics.Process]::Start($git); $legacyStream = [IO.MemoryStream]::new()
+    $gitProcess.StandardOutput.BaseStream.CopyTo($legacyStream); $gitProcess.WaitForExit()
+    $legacyProxy = $legacyStream.ToArray()
+    Assert ($gitProcess.ExitCode -eq 0 -and (Test-KnownLegacyProxy (Get-ByteHash $legacyProxy))) 'Legacy 0.2.0 proxy bytes unavailable.'
     $legacy = Join-Path $fixture 'legacy'
     [IO.Directory]::CreateDirectory($legacy) | Out-Null
     [IO.File]::WriteAllText((Join-Path $legacy 'gravel-Win64-Shipping.exe'), 'inert')
-    Copy-Item -LiteralPath (Join-Path $PackageRoot 'dist\dinput8.dll') -Destination (Join-Path $legacy 'dinput8.dll')
+    [IO.File]::WriteAllBytes((Join-Path $legacy 'dinput8.dll'), $legacyProxy)
     & (Join-Path $PackageRoot 'Uninstall.ps1') -GamePath $legacy
     Assert (-not (Test-Path -LiteralPath (Join-Path $legacy 'dinput8.dll'))) 'Known exact receiptless proxy was retained.'
-    Copy-Item -LiteralPath (Join-Path $PackageRoot 'dist\dinput8.dll') -Destination (Join-Path $legacy 'dinput8.dll')
+    [IO.File]::WriteAllBytes((Join-Path $legacy 'dinput8.dll'), $legacyProxy)
     & (Join-Path $PackageRoot 'Install.ps1') -GamePath $legacy -Product 0006346e -SkipWheelConfig
     Assert (Test-Path -LiteralPath (Join-Path $legacy 'milestone_install.json')) 'Known receiptless upgrade did not create receipt.'
     & (Join-Path $PackageRoot 'Uninstall.ps1') -GamePath $legacy

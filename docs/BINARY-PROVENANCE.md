@@ -5,12 +5,16 @@ It identifies the scripts, setup and documentation being packaged, not the
 compiler origin of copied native binaries. `SourceCommit` retains its historical
 field name; `PackagingSourceCommit` explicitly states that same packaging identity.
 
-Current binaries are retained artifacts, last changed together at
+2026-10-06: dist/dinput8.dll was rebuilt with triple screens (docs/TRIPLES.md): uild.ps1 observed build of
+`1d3d1e1` (clean source, MSYS2 GCC 16.2.0; the receipt stays local in ignored `build/`), committed in
+`f96fe25` and adopted into the catalog in `tools/BinaryProvenance.psm1`. `dist/wheelprobe.exe` is unchanged.
+
+The 0.2.0 binaries were retained artifacts, last changed together at
 `3545810f4fd33647ff19ab87ab02a9aec0afa47a` on September 19, 2026:
 
 | Path | SHA-256 | Git blob at the last-change commit |
 |---|---|---|
-| dist/dinput8.dll | 4e74d46dcfe100c378de3778f3238d941102689bd9fff348b2cecd335b7e2c30 | 8238fa6650ad107b9ce8fc272ad605cc013bc898 |
+| dist/dinput8.dll | ecddaafbbec60f2ed8d89e46a9b6151d66dced2162f7ceef4a81bb9902c56cdf | 963efac9f9942f7317a50900d8ca000c3ee9a8eb (at f96fe25) |
 | dist/wheelprobe.exe | 4d9e94cc31f67f9644bfded1847b94810a9f24cbeba9cee01661ebb361c6883a | 2e0de26f48a0b003103d4f05891cbabd259ac2e5 |
 
 Repository history and `DEPLOYMENT-2026-09-19.md` associate those artifacts with
