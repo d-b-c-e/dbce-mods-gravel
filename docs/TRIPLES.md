@@ -74,14 +74,16 @@ Every code pattern must match exactly once in the running exe, or nothing is pat
 
 ## Seen at the rig (unattended, "Sim Racing", 2026-10-06 03:55-05:35)
 
-- Title, main-menu garage and an offline Cross Country race (Alaska, the owner's championship
-  event): three projected views at 7680x1440 in a race; in the cockpit the A-pillars and side
+- Title, main-menu garage and an offline Cross Country race (Alaska, a championship event): three projected views at 7680x1440 in a race; in the cockpit the A-pillars and side
   windows are on the side screens, the bonnet on the centre, chevron boards and checkpoint posts
   continue across the bezels. HUD (position, completion, race time, minimap, speedo) and the pause
   menu on the centre screen; front-end menus on the centre with black sides. Virtual-pad throttle.
 - Every run: owner saves (`%LOCALAPPDATA%\Gravel\Saved\SaveGames`; the game rewrites
   `settings.sav`) backed up first and restored exactly after; the installed mod restored; display
   watchdog running; game-window captures only (`build/triple-test-*`, ignored).
+
+Installed 2026-10-06 05:50 with the packaged installer (`167b6cc`, dinput8.dll `ecddaafb`); a plain Steam
+launch then came up in triple mode with the menu on the centre screen and black sides.
 
 ## Open
 
