@@ -35,6 +35,17 @@ restoration. Those remain reasons to leave the accepted install untouched.
 The API route is documented by Microsoft in
 [EnumDevicesBySemantics](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ee417807(v=vs.85)).
 
+Clean follow-up source `d10e020` builds successfully; proxy SHA-256
+`A30DD9424894BC90B9788806066DB06E9E751311EB6F99A42FE36C4B6A74F757`.
+Native fake-COM, both SDK ABI variants and actual producer/managed-reader checks
+pass in PS7 and PS5.1. The input helper retains its existing strncpy warning;
+the proxy emitted none. This DLL is a private review build, **not adopted into
+dist, packaged or installed**; dist still contains the earlier `df3c771` recording
+candidate and must not be mistaken for this corrected source. Evidence is under
+`%LOCALAPPDATA%/Dbce/StagePlayback/SessionEvidence/gravel-semantic-guard-20261007`:
+14 files hash-verified, manifest
+`F5979CD065F6C1561CF302211D3D8F620EB61897FBA286D2DC7D3FBC79228E03`.
+
 Validation:
 
 - Shared C++ writer fixtures pass the real managed SessionReader, including
