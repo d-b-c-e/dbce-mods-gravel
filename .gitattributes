@@ -1,3 +1,4 @@
 # Preserve the explicitly hashed source-only session pin across checkout hosts.
 lib/toolkit/include/session_writer.h -text
 lib/toolkit/include/muted_effect.h -text
+lib/session/LICENSE -text

@@ -1,5 +1,14 @@
 # Package and retained-binary provenance
 
+2026-10-07 current **source-only review candidate**: `dist/dinput8.dll` is the
+clean `df3c771` build, committed at `640c394` and adopted into the retained catalog.
+SHA256 `B35F4D0B795C3CA916F98E76CC95925042FF56F2260A0F9A6C8556C3C08F54AA`,
+blob `e1caab5bcc4976d87ef6408ffa8c748175a7ba15`. The ignored observed-build receipt
+records compiler/inputs, six exports, x64 and no unbundled compiler dependency.
+No install or runtime qualification; native recording/mute limitations are in
+`docs/2026-10-07-recording-candidate.md`. The installed renderer and retained
+wheelprobe are unchanged. Earlier artifact details below are historical.
+
 The packaging-source commit is the clean HEAD used by `tools/Package.ps1`.
 It identifies the scripts, setup and documentation being packaged, not the
 compiler origin of copied native binaries. `SourceCommit` retains its historical
