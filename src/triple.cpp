@@ -148,7 +148,7 @@ int panelOf(int pass)
 // (telemetry or ue4 off) the side views stay on.
 bool inGameplay()
 {
-    if (!g_cfg.enabled || !g_cfg.ue4Enabled || !g_tc.menuSidesBlack) return true;
+    if (!g_cfg.ue4Enabled || !g_tc.menuSidesBlack) return true;
     return g_ue4.live.load();
 }
 

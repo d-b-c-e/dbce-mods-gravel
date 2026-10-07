@@ -16,6 +16,10 @@ The installer finds Gravel through Steam and preserves its saved wheel identity
 on updates. A fresh install asks you to choose if several eligible wheels are
 connected. The setup tool can also be opened directly with `WheelSetup.bat`.
 
+Developer recording work is documented in [Recording](docs/RECORDING.md).
+The current source candidate captures sampled signals; gameplay route playback
+and its runtime qualification are still pending.
+
 ## First drive
 
 Close the game, extract the complete ZIP, run **Install.bat**, then open

@@ -4,7 +4,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 # SuiteRoot permits disposable runner-failure fixtures. CI uses only the default.
-$command = Get-Command "$Engine.exe" -CommandType Application -ErrorAction Stop
+$command = Get-Command "$Engine.exe" -CommandType Application -ErrorAction Stop | Select-Object -First 1
 $suites = @('Test-CiWorkflow.ps1','Test-BinaryProvenance.ps1','Test-InstallPackage.ps1','Test-SetupUx.ps1')
 foreach ($suite in $suites) {
     $path = Join-Path $SuiteRoot $suite

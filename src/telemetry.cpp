@@ -132,15 +132,17 @@ static uint8_t u8(float f) { f = f < 0 ? 0 : f > 1 ? 1 : f; return (uint8_t)(f *
 
 static DWORD WINAPI telemetryThread(LPVOID)
 {
-    WSADATA w; WSAStartup(MAKEWORD(2, 2), &w);
-    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    const bool deliver = g_cfg.enabled && !recordingMuted();
+    WSADATA w{};
+    SOCKET s = INVALID_SOCKET;
+    if (deliver && WSAStartup(MAKEWORD(2, 2), &w) == 0) s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     sockaddr_in to{}; to.sin_family = AF_INET; to.sin_port = htons((u_short)g_cfg.port);
     inet_pton(AF_INET, g_cfg.host, &to.sin_addr);
     sockaddr_in mirror = to; mirror.sin_port = htons((u_short)g_cfg.mirrorPort);
     const bool dash = _stricmp(g_cfg.format, "sled") != 0, fh4 = _stricmp(g_cfg.format, "fh4") == 0;
-    const int rate = g_cfg.rate > 0 ? g_cfg.rate : 60;
+    const int rate = g_cfg.rate > 0 && g_cfg.rate <= 240 ? g_cfg.rate : 60;
     const float dt = 1.f / rate;
-    logf("[tx] %s -> %s:%d at %d Hz", g_cfg.format, g_cfg.host, g_cfg.port, rate);
+    logf("[observer] %d Hz; UDP %s", rate, deliver ? "enabled" : "disabled; observation continues");
 
     uint8_t pkt[324]; float prevSpeed = 0, prevConst = 0; ULONGLONG nextStatus = 0, nextDump = 0;
     uint32_t lastImpactSeq = 0; ULONGLONG impactAt = 0; float impactMag = 0.f;
@@ -151,8 +153,12 @@ static DWORD WINAPI telemetryThread(LPVOID)
         LARGE_INTEGER now; QueryPerformanceCounter(&now);
         double due = double(tick) / rate, elapsed = double(now.QuadPart - t0.QuadPart) / freq.QuadPart;
         if (due > elapsed) Sleep((DWORD)((due - elapsed) * 1000));
+        // Disk/discovery delays must not cause a burst of backdated duplicate
+        // samples. Record actual time and resume at the next deadline.
+        else if (elapsed - due > 1.0 / rate) tick = uint64_t(elapsed * rate);
 
         bool ue = ue4Poll();
+        recordingPoll();
         // Gravel exposes no speed on the HUD widget, so FMOD's normalised
         // VehicleSpeed is the source; a UE4 property wins where one exists.
         float speed = 0.f;
@@ -234,6 +240,7 @@ static DWORD WINAPI telemetryThread(LPVOID)
         int n = dbce::forza::build(layout, sl, d, pkt, sizeof pkt, 'R');   // 'R': this mod's frames, for forza_probe
         static int loggedSize = 0;
         if (loggedSize != n) { loggedSize = n; logf("[tx] packet size %d bytes (%s)", n, g_cfg.format); }
+        if (s != INVALID_SOCKET) {
         int rc = sendto(s, (const char *)pkt, n, 0, (sockaddr *)&to, sizeof to);
         static int lastRc = -2, lastErr = 0;
         if (rc != lastRc) { lastRc = rc; lastErr = rc < 0 ? WSAGetLastError() : 0;
@@ -243,6 +250,7 @@ static DWORD WINAPI telemetryThread(LPVOID)
             static int lastM = -2;
             if (mrc != lastM) { lastM = mrc; logf("[tx] mirror sendto -> %d (err %d) port %d", mrc,
                                                   mrc < 0 ? WSAGetLastError() : 0, g_cfg.mirrorPort); }
+        }
         }
 
         ULONGLONG ms = GetTickCount64();
@@ -265,5 +273,7 @@ void telemetryStart()
     static bool started = false;
     if (started) return;
     started = true;
-    CreateThread(nullptr, 0, telemetryThread, nullptr, 0, nullptr);
+    HANDLE thread = CreateThread(nullptr, 0, telemetryThread, nullptr, 0, nullptr);
+    if (thread) CloseHandle(thread);
+    else { started = false; logf("[observer] thread creation failed"); }
 }

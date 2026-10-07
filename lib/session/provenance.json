@@ -1,0 +1,27 @@
+{
+  "contract": "native-session-1",
+  "files": [
+    {
+      "sha256": "0A4368DCE1A00689FE544F662C7DB3C9AE7CF150254ED82317E5A84FD5916E75",
+      "path": "lib/toolkit/include/muted_effect.h",
+      "source": "native/dinput-proxy/muted_effect.h"
+    },
+    {
+      "sha256": "B2212C476244C444D6B7E804AC89C038A88B5C9288A087B30A2343D2DC3021DB",
+      "path": "lib/session/LICENSE",
+      "source": "LICENSE"
+    },
+    {
+      "sha256": "A9DE5D49C55B9B4BE464FB173178D20A97972EACFF500AEE0267E30FB44D19DB",
+      "path": "lib/toolkit/include/session_writer.h",
+      "source": "native/session/session_writer.h"
+    },
+    {
+      "sha256": "83860A42679439C2A3AEDB65B066FEF8272D88A2B8E0636374C12634D278306B",
+      "path": "lib/session/Dbce.Wheel.Recording.dll",
+      "source": "dotnet/Dbce.Wheel.Recording/bin/Release/netstandard2.0/Dbce.Wheel.Recording.dll"
+    }
+  ],
+  "sourceCommit": "85147b87bd7b746cecacc3858425723f4f6b2955",
+  "officialRelease": false
+}

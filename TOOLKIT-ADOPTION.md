@@ -19,12 +19,17 @@ Seeded 2026-10-04 from what was verified that day; `unchecked` rows need a look.
 | STD-009 | Dashboard telemetry matches the HUD | unchecked |  |
 | STD-010 | Install the latest build for testing | adopted | Installed 4b7fd75 renderer bytes, adopted/package 4dc9df7; 14 receipt files match (dinput8 D39FF1B8). Tilted race frame inspected. No physical owner acceptance inferred. |
 | STD-015 | Triples on Surround and on separate monitors | partial | Surround and separate-monitor races seen unattended. Camera-frame fix passes independent seam checks and tilted race image review. Existing ResX arguments still suppress span maintenance; review finding 4 remains open. |
-| STD-019 | Menus on the centre screen; side screens only in gameplay | partial | Observed front end/loading/pause/HUD centred with normal telemetry configuration. Telemetry Off still implies gameplay and stops observation, defeating menu black sides; review finding 3 remains open. |
+| STD-019 | Menus on the centre screen; side screens only in gameplay | partial | Source separates UE observation from UDP and removes telemetry Enabled from menu-side policy. Candidate builds; telemetry-off rendered regression remains a live gate. Earlier normal-telemetry menu evidence stays historical. |
 | STD-011 | Work lands on main | adopted | Renderer fixes, reviewed evidence and adoption rows pushed on main. |
-| STD-012 | Reproduce the route and preserve original signals | pending | No qualified gameplay recorder/player. UE observation remains coupled to telemetry output; separate producer and delivery before muted recording. |
+| STD-012 | Reproduce the route and preserve original signals | partial | Native sampled-signal producer/delivery split, bounded session writer and actual-producer/managed-reader checks pass. Diagnostic sink fake-COM checks pass. Not installed/live-qualified; no physics-tick recorder, pose player or exact force replay. See docs/RECORDING.md. |
 | STD-013 | The installed build launches plainly | partial | Plain Steam launch verified on prior renderer; corrected race/tilt and receipt checked. Broader option/transition cases remain open. |
 | STD-014 | Request reciprocal review when progress stalls | adopted | Codex reviewed source and exact install; fixes 1/2 independently checked, findings 3/4 handed back to Claude. |
 | STD-016 | Forza Horizon telemetry on by default | unchecked | Packet/default/owner-display audit not established by this renderer check. |
 | STD-017 | Hide empty settings pages | unchecked | Setup panel inventory not part of this renderer review. |
 | STD-018 | Handling changes never reach online scores | unchecked | Recording/offline/scoring eligibility requires its own investigation before taking pose ownership. |
-| STD-020 | Standard portfolio feature checklist | partial | All 20 rows represented; limited and unchecked features remain explicit. |
+| STD-020 | Standard portfolio feature checklist | partial | All 25 rows represented; limited and unchecked features remain explicit. |
+| STD-021 | Art at 50 is the FFB reference | pending | Native force passthrough, no calibrated mod model. Sampled summaries cannot establish equivalent feel or exact force replay. |
+| STD-022 | Off / Surround / Separate monitors selector | pending | Existing native config uses Auto/On/Off; three-way standard not adopted. |
+| STD-023 | Frame-rate readout and log | pending | Shared frame-rate window not implemented. |
+| STD-024 | Optional on-screen frame-rate counter | pending | Not implemented. |
+| STD-025 | Shared tyre-force model and adapters | pending | Current Gravel mod observes/passes through native game FFB. No replacement tyre adapter or qualified raw tyre signals yet; no silent native force replacement in recorder work. |

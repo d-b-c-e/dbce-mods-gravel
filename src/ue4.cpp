@@ -342,6 +342,7 @@ static bool discover()
 
 bool ue4Poll()
 {
+    g_ue4.available = 0;
     if (!g_cfg.ue4Enabled) return false;
     ue4Init();
     ULONGLONG now = GetTickCount64();
@@ -376,10 +377,26 @@ bool ue4Poll()
         if (g_instIdx < 0) { g_ue4.live = false; return false; }
         logf("[ue4] live %s instance #%d at %p", g_pRpm.ownerName.c_str(), g_instIdx, (void *)g_inst);
     }
-    g_ue4.rpm = readF(g_inst, g_pRpm);
-    g_ue4.maxRpm = readF(g_inst, g_pMax);
-    g_ue4.speed = readF(g_inst, g_pSpeed);
-    g_ue4.gear = readI(g_inst, g_pGear);
+    uint32_t available = 0;
+    auto sampleF = [&](const Prop& p, std::atomic<float>& output, uint32_t bit) {
+        float v = 0;
+        if (p.offset >= 0 && rd(g_inst + p.offset, v)) available |= bit;
+        output = v;
+    };
+    sampleF(g_pRpm, g_ue4.rpm, 1);
+    sampleF(g_pMax, g_ue4.maxRpm, 2);
+    sampleF(g_pSpeed, g_ue4.speed, 4);
+    int gear = 0;
+    if (g_pGear.offset >= 0) {
+        if (g_pGear.size == 1) { int8_t v; if (rd(g_inst + g_pGear.offset, v)) { gear = v; available |= 8; } }
+        else if (g_pGear.size == 4 && g_pGear.type == "FloatProperty") {
+            float v;
+            if (rd(g_inst + g_pGear.offset, v) && v >= -128 && v <= 128) { gear = (int)v; available |= 8; }
+        } else { int32_t v; if (rd(g_inst + g_pGear.offset, v)) { gear = v; available |= 8; } }
+    }
+    g_ue4.gear = gear;
+    g_ue4.available = available;
+    if (!(available & 1)) { g_inst = nullptr; g_ue4.live = false; return false; }
     g_ue4.live = true;
     return true;
 }

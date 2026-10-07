@@ -91,6 +91,7 @@ void sidecarPath(char *out, const char *leaf);   // <exe dir>\leaf
 // Plain atomics; each field is independently consistent, which is all a
 // 60 Hz sampler needs.
 struct InputState {
+    std::atomic<ULONGLONG> observedAt{0};
     std::atomic<float> steer{0};      // -1..1
     std::atomic<float> throttle{0};   // 0..1
     std::atomic<float> brake{0};
@@ -102,6 +103,9 @@ struct InputState {
     std::atomic<uint32_t> reads{0};
 };
 struct FfbState {
+    std::atomic<ULONGLONG> observedAt{0};
+    std::atomic<ULONGLONG> summaryAt[4]{}; // constant/periodic/spring/damper ever observed
+    std::atomic<uint32_t> tableOverflow{0}, mutedWrites{0}, mutedStarts{0};
     std::atomic<float> constant{0};   // -1..1, signed, latest constant-force magnitude
     std::atomic<float> periodic{0};   // 0..1, latest periodic (rumble) magnitude
     std::atomic<float> spring{0};     // 0..1
@@ -111,6 +115,8 @@ struct FfbState {
     std::atomic<uint32_t> effects{0}; // effects created so far
 };
 struct FmodState {
+    // Per-parameter availability/age; values are audio requests, not tyre forces.
+    std::atomic<ULONGLONG> observedAt[9]{};
     std::atomic<float> rpm{-1};       // -1 = never seen
     std::atomic<float> load{-1};      // engine torque 0..1
     std::atomic<float> speed{-1};     // 0..1 of top speed
@@ -125,6 +131,7 @@ struct FmodState {
     std::atomic<uint32_t> calls{0};
 };
 struct Ue4State {
+    std::atomic<uint32_t> available{0}; // successful current reads: rpm/max/speed/gear bits
     std::atomic<float> rpm{0};
     std::atomic<float> maxRpm{0};
     std::atomic<float> speed{0};      // raw units from the game
@@ -143,6 +150,9 @@ void fmodTapInstall();     // delay-load IAT hook
 void ue4Init();            // start discovery (idempotent)
 bool ue4Poll();            // refresh g_ue4; returns live
 void telemetryStart();     // spawn the sender thread
+void recordingInit();      // claim an optional expiring one-launch request
+bool recordingMuted();     // latched until process exit, including after capture stops
+void recordingPoll();      // observation worker only; no game-thread disk writes
 void tripleAttach();       // DllMain: three projected views via emulated stereo (triple.cpp)
 void tripleReport();       // log what tripleAttach did, once logging is configured
 

@@ -1,6 +1,8 @@
 build/
 artifacts/
 *.log
+**/bin/
+**/obj/
 
 # The prebuilt DLL ships so users need no MSYS2 toolchain.
 !dist/

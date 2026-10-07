@@ -36,7 +36,7 @@ foreach ($privatePath in 'games/gravel/settings.sav','game.iso','generated-game.
 $fixture=Join-Path ([IO.Path]::GetTempPath()) ('gravel-ci-runner-'+[guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($fixture) | Out-Null
 $shell = if ($PSVersionTable.PSEdition -eq 'Desktop') {'powershell'} else {'pwsh'}
-$command=Get-Command "$shell.exe" -CommandType Application
+$command=Get-Command "$shell.exe" -CommandType Application | Select-Object -First 1
 $suiteNames=@('Test-CiWorkflow.ps1','Test-BinaryProvenance.ps1','Test-InstallPackage.ps1','Test-SetupUx.ps1')
 $marker=Join-Path $fixture 'later-suite-ran.txt'
 function Invoke-FixtureRunner([string]$LogPath) {
