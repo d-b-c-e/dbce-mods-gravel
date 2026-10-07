@@ -15,6 +15,10 @@ if ($LASTEXITCODE) { throw 'Capture fake-COM checks failed.' }
 if ($LASTEXITCODE) { throw 'SDK ABI fixture build failed.' }
 & (Join-Path $out 'abi.exe')
 if ($LASTEXITCODE) { throw 'SDK ABI checks failed.' }
+& $Compiler -std=c++17 -DABI_ANSI -Wall -Wno-unused-function -static ('-I'+(Join-Path $root 'lib/toolkit/include')) -o (Join-Path $out 'abi-ansi.exe') (Join-Path $PSScriptRoot 'NativeAbi.cpp') -ldxguid -luuid -lole32
+if ($LASTEXITCODE) { throw 'ANSI SDK ABI fixture build failed.' }
+& (Join-Path $out 'abi-ansi.exe')
+if ($LASTEXITCODE) { throw 'ANSI SDK ABI checks failed.' }
 & $Compiler -std=c++17 -Wall -Wno-unused-function -static ('-I'+(Join-Path $root 'lib/toolkit/include')) -o (Join-Path $out 'recording.exe') (Join-Path $PSScriptRoot 'NativeRecording.cpp')
 if ($LASTEXITCODE) { throw 'Native recording fixture build failed.' }
 $result = Join-Path ([IO.Path]::GetTempPath()) ('gravel-recording-fixture-'+[guid]::NewGuid().ToString('N'))

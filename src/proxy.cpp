@@ -547,6 +547,51 @@ static HRESULT STDMETHODCALLTYPE HookCreateA(void *s, REFGUID g, LPDIRECTINPUTDE
 }
 
 static void *g_oInputQueryW, *g_oInputQueryA;
+static void *g_oSemanticsW, *g_oSemanticsA, *g_oConfigureW, *g_oConfigureA;
+
+// EnumDevicesBySemantics hands the application an already-created device;
+// it need not call our CreateDevice hook. Guard that borrowed interface before
+// the application sees it. The callback owns no reference for us to release.
+struct SemanticsW { LPDIENUMDEVICESBYSEMANTICSCBW cb; void* ref; bool refused=false; };
+struct SemanticsA { LPDIENUMDEVICESBYSEMANTICSCBA cb; void* ref; bool refused=false; };
+static BOOL CALLBACK ShimSemanticsW(LPCDIDEVICEINSTANCEW info, LPDIRECTINPUTDEVICE8W dev, DWORD flags, DWORD remaining, LPVOID ref) {
+    auto& c=*(SemanticsW*)ref;
+    if (!info || !dev || !hookDevice(dev,true)) { c.refused=true; return DIENUM_STOP; }
+    DIDEVICEINSTANCEW copy=*info; retype(copy.guidProduct,copy.dwDevType);
+    return c.cb(&copy,dev,flags,remaining,c.ref);
+}
+static BOOL CALLBACK ShimSemanticsA(LPCDIDEVICEINSTANCEA info, LPDIRECTINPUTDEVICE8A dev, DWORD flags, DWORD remaining, LPVOID ref) {
+    auto& c=*(SemanticsA*)ref;
+    if (!info || !dev || !hookDevice(dev,false)) { c.refused=true; return DIENUM_STOP; }
+    DIDEVICEINSTANCEA copy=*info; retype(copy.guidProduct,copy.dwDevType);
+    return c.cb(&copy,dev,flags,remaining,c.ref);
+}
+static HRESULT STDMETHODCALLTYPE HookSemanticsW(void* self, LPCWSTR user, LPDIACTIONFORMATW map, LPDIENUMDEVICESBYSEMANTICSCBW cb, void* ref, DWORD flags) {
+    using Fn=HRESULT(STDMETHODCALLTYPE*)(void*,LPCWSTR,LPDIACTIONFORMATW,LPDIENUMDEVICESBYSEMANTICSCBW,void*,DWORD);
+    if (!recordingMuted()) return ((Fn)g_oSemanticsW)(self,user,map,cb,ref,flags);
+    if (!cb) return DIERR_INVALIDPARAM;
+    SemanticsW c{cb,ref};
+    HRESULT hr=((Fn)g_oSemanticsW)(self,user,map,ShimSemanticsW,&c,flags);
+    return c.refused ? DIERR_GENERIC : hr;
+}
+static HRESULT STDMETHODCALLTYPE HookSemanticsA(void* self, LPCSTR user, LPDIACTIONFORMATA map, LPDIENUMDEVICESBYSEMANTICSCBA cb, void* ref, DWORD flags) {
+    using Fn=HRESULT(STDMETHODCALLTYPE*)(void*,LPCSTR,LPDIACTIONFORMATA,LPDIENUMDEVICESBYSEMANTICSCBA,void*,DWORD);
+    if (!recordingMuted()) return ((Fn)g_oSemanticsA)(self,user,map,cb,ref,flags);
+    if (!cb) return DIERR_INVALIDPARAM;
+    SemanticsA c{cb,ref};
+    HRESULT hr=((Fn)g_oSemanticsA)(self,user,map,ShimSemanticsA,&c,flags);
+    return c.refused ? DIERR_GENERIC : hr;
+}
+// Configuration UI can create/configure further devices internally. A bounded
+// recording does not enter this unqualified route; ordinary launches pass it on.
+static HRESULT STDMETHODCALLTYPE HookConfigureW(void* self, LPDICONFIGUREDEVICESCALLBACK cb, LPDICONFIGUREDEVICESPARAMSW p, DWORD flags, void* ref) {
+    if (recordingMuted()) return DIERR_UNSUPPORTED;
+    return ((HRESULT(STDMETHODCALLTYPE*)(void*,LPDICONFIGUREDEVICESCALLBACK,LPDICONFIGUREDEVICESPARAMSW,DWORD,void*))g_oConfigureW)(self,cb,p,flags,ref);
+}
+static HRESULT STDMETHODCALLTYPE HookConfigureA(void* self, LPDICONFIGUREDEVICESCALLBACK cb, LPDICONFIGUREDEVICESPARAMSA p, DWORD flags, void* ref) {
+    if (recordingMuted()) return DIERR_UNSUPPORTED;
+    return ((HRESULT(STDMETHODCALLTYPE*)(void*,LPDICONFIGUREDEVICESCALLBACK,LPDICONFIGUREDEVICESPARAMSA,DWORD,void*))g_oConfigureA)(self,cb,p,flags,ref);
+}
 static HRESULT STDMETHODCALLTYPE HookInputQueryW(void* self, REFIID i, void** out) {
     if (recordingMuted()) return captureQuery(self, i, IID_IDirectInput8W, out);
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, REFIID, void**))g_oInputQueryW)(self, i, out);
@@ -560,11 +605,19 @@ static bool hookInput(void* object, REFIID iid) {
     if (IsEqualIID(iid, IID_IDirectInput8W)) {
         ok = patchVtable(object, 4, (void*)HookEnumW, &g_oEnumW) && ok;
         ok = patchVtable(object, 3, (void*)HookCreateW, &g_oCreateW) && ok;
-        if (recordingMuted()) ok = patchVtable(object, 0, (void*)HookInputQueryW, &g_oInputQueryW) && ok;
+        if (recordingMuted()) {
+            ok = patchVtable(object, 0, (void*)HookInputQueryW, &g_oInputQueryW) && ok;
+            ok = patchVtable(object, 9, (void*)HookSemanticsW, &g_oSemanticsW) && ok;
+            ok = patchVtable(object, 10, (void*)HookConfigureW, &g_oConfigureW) && ok;
+        }
     } else if (IsEqualIID(iid, IID_IDirectInput8A)) {
         ok = patchVtable(object, 4, (void*)HookEnumA, &g_oEnumA) && ok;
         ok = patchVtable(object, 3, (void*)HookCreateA, &g_oCreateA) && ok;
-        if (recordingMuted()) ok = patchVtable(object, 0, (void*)HookInputQueryA, &g_oInputQueryA) && ok;
+        if (recordingMuted()) {
+            ok = patchVtable(object, 0, (void*)HookInputQueryA, &g_oInputQueryA) && ok;
+            ok = patchVtable(object, 9, (void*)HookSemanticsA, &g_oSemanticsA) && ok;
+            ok = patchVtable(object, 10, (void*)HookConfigureA, &g_oConfigureA) && ok;
+        }
     } else ok = false;
     return !recordingMuted() || ok;
 }

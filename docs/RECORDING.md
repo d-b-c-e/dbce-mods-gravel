@@ -49,7 +49,13 @@ existing autocentre-off state if a setter refuses an already acquired device.
 The SDK-interface ABI suite now catches the original incorrect device Escape
 slot (24, not 23), and exercises factory-created devices and legacy-interface
 refusal. `DllGetClassObject` is guarded as well as `DirectInput8Create`.
-COM activation resolving system32 directly, device-property lifecycle/restoration
+Both ANSI and Unicode `EnumDevicesBySemantics` callbacks now guard the returned
+device before the game sees it; an unguardable device returns an error without
+a callback. The configuration UI path is refused only in capture mode. SDK
+tests exercise both interface families, including enumeration before any
+CreateDevice call.
+COM activation resolving system32 directly, shared-vtable concurrency/lifetime,
+device-property lifecycle/restoration
 and actual game behaviour remain review/runtime gates. The EXE imports both
 DirectInput8Create and CoCreateInstance; do not assume the proxy factory catches
 the latter. No physical acceptance is implied.

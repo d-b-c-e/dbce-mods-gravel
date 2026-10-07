@@ -18,6 +18,23 @@ derive the SDK interfaces and call through their virtual methods, separately fro
 the direct-hook tests. Capture QueryInterface returns only the guarded interface
 or its IUnknown; legacy interfaces and aggregation are refused.
 
+Second-review follow-up: `EnumDevicesBySemantics` returns a device directly to
+the application's callback, bypassing `CreateDevice`. The candidate now wraps
+both ANSI and Unicode callbacks and guards the borrowed device before exposing
+it. Failure stops enumeration and returns an error without calling the game.
+`ConfigureDevices` is refused during capture because its internal device/UI
+route is not qualified. Ordinary sessions retain direct forwarding.
+
+The SDK-interface fixture now builds and runs in both ANSI and Unicode forms.
+It enumerates before any `CreateDevice` call, tests guarded device calls inside
+the callback, preserves callback flags/context, rejects a different unguardable
+device implementation without a callback, and checks normal forwarding.
+This closes that specific alternate creation route. It does not close direct
+system32 COM activation, shared-vtable concurrency/lifetime or device-property
+restoration. Those remain reasons to leave the accepted install untouched.
+The API route is documented by Microsoft in
+[EnumDevicesBySemantics](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ee417807(v=vs.85)).
+
 Validation:
 
 - Shared C++ writer fixtures pass the real managed SessionReader, including
