@@ -1,0 +1,12 @@
+Vendored from dbce-wheel-mod-toolkit at 26d94a5 (the fence with Settings::observe, sana 107988), byte-exact with LF
+line ends (.gitattributes), into src/vendor/dinput-proxy and src/vendor/controls:
+  dinput-proxy/dbce_fence.hpp          blob 1870635df2
+  dinput-proxy/dbce_test_switches.hpp  blob 8f38f8b1a7
+  dinput-proxy/dbce_joyformat.hpp      blob d18a4b80d6
+  dinput-proxy/dbce_shape_state.hpp    blob 7b066e6878
+  controls/dbce_controls.hpp           blob 3396947a31
+  controls/dbce_inject.hpp             blob 0fa5e93c8d
+  controls/dbce_inject_table.hpp       blob a7784f0ae1
+  controls/dbce_shape.hpp              blob 9ce1a9d401
+The STD-033 force fence and test injection for unattended control runs (ffb-fence.on, inject.on). Change the toolkit and
+copy again; do not edit here. lib/toolkit (v0.8.0, the device/packet pin) is separate and unchanged.

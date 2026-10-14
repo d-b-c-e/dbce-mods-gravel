@@ -15,6 +15,7 @@ bool recordingMuted() { return muted; }
 void recordingInit() {} void recordingPoll() {} void loadConfig() {} void tripleReport() {}
 void tripleAttach() {} void fmodTapInstall() {} void telemetryStart() {}
 void logf(const char*, ...) {}
+void sidecarPath(char* out, const char* leaf) { strcpy(out, leaf); }
 bool safeRead(const void* p, void* out, size_t n) { memcpy(out,p,n); return true; }
 
 struct Device : ABI(IDirectInputDevice8) {

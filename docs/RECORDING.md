@@ -118,9 +118,46 @@ mute (sana 90041). What exists and what is open:
   `DINPUT8.dll`, nor in the other game-folder modules that import `CoCreateInstance` (TrueSky, FMOD). That makes a
   registry activation of DirectInput unlikely, but it is **not proof** that no COM path exists: a GUID built at run
   time, or a module loaded from outside the game folder (the Steam overlay, drivers), is not excluded.
-- **Not reused.** The toolkit's `DBCE_FFB_MUTE` is a contract (STD-035 item 8), not a native facility, and its
-  dinput8 fence (`native/dinput-proxy` `dbce_fence.hpp`/`dbce_test_switches.hpp`, as in GRID, DiRT and V-Rally 4)
-  is newer than this repo's `lib/toolkit` v0.8.0. Adopting it here would be adapter work, not done.
+- **Not reused for recording.** The toolkit's `DBCE_FFB_MUTE` is a contract (STD-035 item 8), not a native facility.
+  The toolkit's dinput8 fence is now adopted for unattended control runs (below), but not for recording: under the
+  fence the game's effects are software sinks the proxy never sees, so a capture would lose its original force
+  observations. A recording request therefore keeps the latch above, with its open gaps, and excludes the fence.
+
+## Force fence for unattended control runs (2026-10-14, sana 107988)
+
+The proxy answers the toolkit's STD-033 switches, as GRID 2019, DiRT 3/4, DiRT Rally 2 and Rush Rally 3 do. The fence
+and its injection are vendored byte-exact under `src/vendor` (`dinput-proxy/VENDORED.txt`).
+
+- **`%LOCALAPPDATA%\dbce\gravel\ffb-fence.on` at start.** DirectInput8Create gives the game the toolkit's closed
+  wrapper (`dbce_fence.hpp`) over the proxy's own hooked interface.
+  - The wheel stays visible and readable, and every call the fence forwards still passes the proxy's hooks: the
+    re-type, the range tracking and the read tap.
+  - No effect, force gain, force command, escape or device data reaches a device. Effects are software sinks.
+    Auto-centring is forwarded only when the game turns it off.
+  - Unlike the recording latch, the fence writes no force property to the device, so it leaves nothing to restore.
+  - COM creation (`DllGetClassObject`) is refused. Outside `gravel-Win64-Shipping.exe`, DirectInput is refused.
+- **`inject.on` as well.** `inject.txt` in the same folder carries `inject raw ...` and `inject action ...` lines.
+  Action ids resolve through a `[Controls]` section in `milestone_mod.ini`, which a test runner writes for the run.
+- **What the telemetry shows.** Fenced, the read tap runs through the fence's observer (`Settings::observe`, toolkit
+  `26d94a5`), after injection: the Forza steer, throttle, brake, clutch and handbrake bytes show what the game's
+  DirectInput read received. That is delivery to the game's read, not consumption by the car's physics. Speed or gear
+  must show consumption.
+- **Standard formats only.** Injection and observation apply only when the game reads with `c_dfDIJoystick` or
+  `c_dfDIJoystick2`. A custom format gets neither, and the fence logs it once.
+- **A recording request wins.** With a recording request the switch is ignored and logged; the recording latch applies.
+
+`tools/tests/NativeFence.cpp` (run by `Test-NativeCapture.ps1`) checks these rules with SDK interfaces and no hardware:
+- the switch rules;
+- the re-type through the wrapper;
+- no force route reaching the fake device;
+- the read tap once per read, showing the injected values;
+- the unfenced tap unchanged.
+
+**Not yet done:**
+- the toolkit's `fence-live-probe` on this proxy with the real wheel;
+- a game run;
+- a Gravel runner for the hub harness;
+- the save-safe launch plan (Steam Cloud).
 
 ## Remaining route-playback work
 

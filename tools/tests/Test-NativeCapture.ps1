@@ -19,6 +19,11 @@ if ($LASTEXITCODE) { throw 'SDK ABI checks failed.' }
 if ($LASTEXITCODE) { throw 'ANSI SDK ABI fixture build failed.' }
 & (Join-Path $out 'abi-ansi.exe')
 if ($LASTEXITCODE) { throw 'ANSI SDK ABI checks failed.' }
+# The STD-033 fence over the proxy's own hooks (sana 107988); c_dfDIJoystick2 comes from libdinput8.
+& $Compiler -std=c++17 -Wall -Wno-unused-function -Wno-unknown-pragmas -static ('-I'+(Join-Path $root 'lib/toolkit/include')) -o (Join-Path $out 'fence.exe') (Join-Path $PSScriptRoot 'NativeFence.cpp') -ldinput8 -ldxguid -luuid -lole32
+if ($LASTEXITCODE) { throw 'Fence fixture build failed.' }
+& (Join-Path $out 'fence.exe')
+if ($LASTEXITCODE) { throw 'Fence fixture checks failed.' }
 & $Compiler -std=c++17 -Wall -Wno-unused-function -static ('-I'+(Join-Path $root 'lib/toolkit/include')) -o (Join-Path $out 'recording.exe') (Join-Path $PSScriptRoot 'NativeRecording.cpp')
 if ($LASTEXITCODE) { throw 'Native recording fixture build failed.' }
 $result = Join-Path ([IO.Path]::GetTempPath()) ('gravel-recording-fixture-'+[guid]::NewGuid().ToString('N'))

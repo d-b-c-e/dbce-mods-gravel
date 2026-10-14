@@ -20,13 +20,26 @@
 // Vtables are shared by every instance of a class, so each hook checks that
 // `self` is one of the devices/effects we care about and otherwise forwards
 // untouched.
+//
+// THE FENCE (STD-033, sana 107988)
+// With %LOCALAPPDATA%\dbce\gravel\ffb-fence.on at start, the game gets the
+// toolkit's closed wrapper (vendor/dinput-proxy/dbce_fence.hpp) over this
+// proxy's own hooked interface: the wheel stays visible and readable, every
+// call the fence forwards still passes the hooks here (re-type, ranges, the
+// read tap), and no effect, gain, command or escape reaches a device.
+// inject.on adds test injection (inject.txt), and the read tap then sees the
+// state after injection. A recording request excludes the fence; it keeps its
+// own latch below.
 #include "common.h"
 #include <cmath>
 #include <new>
 #include "muted_effect.h"
+#include "vendor/dinput-proxy/dbce_test_switches.hpp"
 
 static HMODULE g_real = nullptr;
 typedef HRESULT (WINAPI *PFN_Create)(HINSTANCE, DWORD, REFIID, LPVOID *, LPUNKNOWN);
+static bool g_fence = false, g_injectOn = false, g_fencePinned = false;
+static dbce::controls::InjectionTable g_injections;
 
 static bool patchVtable(void *obj, int slot, void *hook, void **orig)
 {
@@ -276,12 +289,13 @@ static float norm01(LONG v, LONG lo, LONG hi)
     return f < 0 ? 0 : f > 1 ? 1 : f;
 }
 
-static HRESULT STDMETHODCALLTYPE HookGetState(void *self, DWORD cb, LPVOID data, bool uni)
+// The read tap: what the game read becomes InputState. Unfenced it runs in the hook below; fenced, the fence calls it
+// (Settings::observe) with the final state the game receives, after any test injection, so the telemetry shows that.
+static void observeState(void *self, DWORD cb, const void *data)
 {
-    HRESULT hr = ((PFN_GetState)(uni ? g_oGetStateW : g_oGetStateA))(self, cb, data);
     TrackedDev *t = findDev(self);
-    if (FAILED(hr) || !t || !data || cb < 80)
-        return hr;                                   // not ours, or a custom format
+    if (!t || !data || cb < 80)
+        return;                                      // not ours, or a custom format
     if (!t->rangesKnown) learnRanges(t);
     const LONG *ax = (const LONG *)data;             // lX lY lZ lRx lRy lRz slider[2]
     {
@@ -290,7 +304,7 @@ static HRESULT STDMETHODCALLTYPE HookGetState(void *self, DWORD cb, LPVOID data,
         const BYTE *b = (const BYTE *)data + 48;
         for (int i = 0; i < 32 && blank; ++i) if (b[i] & 0x80) blank = false;
         if (!blank && !t->everLive) { t->everLive = true; g_liveDev = self; logf("[input] device %p is delivering real state", self); }
-        if (g_liveDev && !t->everLive) return hr;      // a blank twin; ignore
+        if (g_liveDev && !t->everLive) return;         // a blank twin; ignore
     }
     auto get = [&](const char *name, bool bipolar) -> float {
         int i = axisIndex(name);
@@ -313,8 +327,14 @@ static HRESULT STDMETHODCALLTYPE HookGetState(void *self, DWORD cb, LPVOID data,
     g_input.live = true;
     g_input.observedAt = GetTickCount64();
     ++g_input.reads;
+}
+static HRESULT STDMETHODCALLTYPE HookGetState(void *self, DWORD cb, LPVOID data, bool uni)
+{
+    HRESULT hr = ((PFN_GetState)(uni ? g_oGetStateW : g_oGetStateA))(self, cb, data);
+    if (SUCCEEDED(hr) && !g_fence) observeState(self, cb, data);
     return hr;
 }
+static void observeFenced(const void *device, int, DWORD cb, const void *state) { observeState(const_cast<void *>(device), cb, state); }
 static HRESULT STDMETHODCALLTYPE HookGetStateW(void *s, DWORD c, LPVOID d) { return HookGetState(s, c, d, true); }
 static HRESULT STDMETHODCALLTYPE HookGetStateA(void *s, DWORD c, LPVOID d) { return HookGetState(s, c, d, false); }
 
@@ -648,6 +668,37 @@ public:
 };
 
 // ---------------------------------------------------------------- exports
+// The fence is answered only inside the game itself, as in the toolkit's other proxies.
+static bool exeIsGravel()
+{
+    char path[MAX_PATH];
+    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (!n || n >= MAX_PATH) return false;
+    const char *leaf = strrchr(path, '\\');
+    return _stricmp(leaf ? leaf + 1 : path, "gravel-Win64-Shipping.exe") == 0;
+}
+
+// STD-033 switches, read once at start (dbce_test_switches.hpp). A recording request has latched its own mute by now and
+// excludes the fence: its zero-gain path still reaches the device, and its open gaps stay documented (docs/RECORDING.md).
+static void fenceInit()
+{
+    const bool requested = dbce::testing::switchFile("gravel", "ffb-fence.on");
+    if (requested && recordingMuted()) { logf("[proxy] ffb-fence.on ignored: a recording request latched its own mute"); return; }
+    if (!requested) return;
+    g_fence = true;
+    g_fencePinned = exeIsGravel();
+    g_injectOn = dbce::testing::switchFile("gravel", "inject.on");
+    dbce::fence::settings().log = [](const char *line) { logf("%s", line); };
+    dbce::fence::settings().observe = observeFenced;
+    if (g_injectOn) dbce::fence::settings().injections = &g_injections;
+    logf("[proxy] force feedback FENCED (ffb-fence.on): devices visible, no force can reach one%s%s",
+         g_injectOn ? "; test injection allowed (inject.on)" : "", g_fencePinned ? "" : "; not gravel-Win64-Shipping.exe, so DirectInput is refused");
+    if (g_injectOn && g_fencePinned) {
+        char ini[MAX_PATH]; sidecarPath(ini, "milestone_mod.ini");
+        if (!dbce::testing::StartInjectReader("gravel", ini, &g_injections)) logf("[proxy] inject.txt reader did not start");
+    }
+}
+
 static std::atomic<bool> g_inited{false};
 void proxyInit()
 {
@@ -655,6 +706,7 @@ void proxyInit()
     InitializeCriticalSection(&g_devLock);
     loadConfig();
     recordingInit();
+    fenceInit();
     tripleReport();
     char sys[MAX_PATH];
     GetSystemDirectoryA(sys, MAX_PATH);
@@ -665,14 +717,9 @@ void proxyInit()
     telemetryStart();
 }
 
-// IDirectInput8 vtable: 3 CreateDevice, 4 EnumDevices
-extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE h, DWORD ver, REFIID riid, LPVOID *out, LPUNKNOWN unk)
+// The real interface with this proxy's hooks on it. Fenced, the game's wrapper forwards into it.
+static HRESULT WINAPI CreateHookedDirectInput(HINSTANCE h, DWORD ver, REFIID riid, LPVOID *out, LPUNKNOWN unk)
 {
-    proxyInit();
-    if (recordingMuted() && (unk || (!IsEqualIID(riid,IID_IDirectInput8W) && !IsEqualIID(riid,IID_IDirectInput8A)))) {
-        if (out) *out=nullptr;
-        return E_NOINTERFACE;
-    }
     if (!g_real) return E_FAIL;
     PFN_Create fn = (PFN_Create)GetProcAddress(g_real, "DirectInput8Create");
     if (!fn) return E_FAIL;
@@ -682,8 +729,22 @@ extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE h, DWORD ver, REFIID riid
     return hr;
 }
 
+// IDirectInput8 vtable: 3 CreateDevice, 4 EnumDevices
+extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE h, DWORD ver, REFIID riid, LPVOID *out, LPUNKNOWN unk)
+{
+    proxyInit();
+    if (g_fence) return dbce::testing::CreateFencedDirectInput(CreateHookedDirectInput, h, ver, riid, out, unk, g_fencePinned);
+    if (recordingMuted() && (unk || (!IsEqualIID(riid,IID_IDirectInput8W) && !IsEqualIID(riid,IID_IDirectInput8A)))) {
+        if (out) *out=nullptr;
+        return E_NOINTERFACE;
+    }
+    return CreateHookedDirectInput(h, ver, riid, out, unk);
+}
+
 extern "C" HRESULT WINAPI DllGetClassObject(REFCLSID cls, REFIID iid, void** out) {
     proxyInit();
+    // Fenced, COM creation would hand out an unwrapped DirectInput. Gravel imports DirectInput8Create (docs/RECORDING.md).
+    if (g_fence) { if (out) *out = nullptr; logf("[proxy] DllGetClassObject refused while fenced"); return CLASS_E_CLASSNOTAVAILABLE; }
     using GetClass = HRESULT (WINAPI *)(REFCLSID, REFIID, void**);
     auto real = (GetClass)(g_real ? GetProcAddress(g_real,"DllGetClassObject") : nullptr);
     if (!real) return E_FAIL;
