@@ -166,6 +166,16 @@ int main() {
     gainOnly.dwGain=10000;
     assert(SUCCEEDED(effect2->SetParameters(&gainOnly,DIEP_GAIN)) && SUCCEEDED(effect2->SetParameters(&turn,DIEP_DIRECTION)));
     assert(std::abs(g_ffb.constant.load()-.9f)<1e-5f);
+    // A type-only write reads no direction (lola 109433): point effect2 left again, then send a new magnitude with an
+    // unflagged poison direction pointer. Dereferencing it would fault; the kept left direction must stay.
+    LONG leftAgain=-1; DIEFFECT turnLeft{}; turnLeft.dwSize=sizeof turnLeft; turnLeft.cAxes=1; turnLeft.rglDirection=&leftAgain;
+    assert(SUCCEEDED(effect2->SetParameters(&turnLeft,DIEP_DIRECTION)) && std::abs(g_ffb.constant.load()+.9f)<1e-5f);
+    DICONSTANTFORCE stronger{9500};
+    DIEFFECT typeOnly{}; typeOnly.dwSize=sizeof typeOnly; typeOnly.cAxes=1; typeOnly.rglDirection=(LONG*)(uintptr_t)0x10;
+    typeOnly.cbTypeSpecificParams=sizeof stronger; typeOnly.lpvTypeSpecificParams=&stronger;
+    const uint32_t writesTyped=g_ffb.mutedWrites.load(), startsTyped=g_ffb.mutedStarts.load();
+    assert(SUCCEEDED(effect2->SetParameters(&typeOnly,DIEP_TYPESPECIFICPARAMS)) && std::abs(g_ffb.constant.load()+.95f)<1e-5f);
+    assert(g_ffb.mutedWrites.load()==writesTyped+1 && g_ffb.mutedStarts.load()==startsTyped);
     // SetParameters with DIEP_START is one write, not a start; an explicit Start is one start.
     const uint32_t writes=g_ffb.mutedWrites.load(), startsBefore=g_ffb.mutedStarts.load();
     constant.lMagnitude=-2000;

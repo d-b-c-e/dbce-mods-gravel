@@ -378,9 +378,10 @@ static void absorb(TrackedEff *t, LPCDIEFFECT e, DWORD flags)
     if (!e) return;
     const bool typed = (flags & DIEP_TYPESPECIFICPARAMS) && e->lpvTypeSpecificParams;
     const bool scaled = (flags & DIEP_GAIN) != 0;
-    // direction: with a single axis, rglDirection[0] sign flips the force (read with the type parameters, as before,
-    // or alone with DIEP_DIRECTION)
-    const bool turned = (flags & (DIEP_DIRECTION | DIEP_TYPESPECIFICPARAMS)) && e->cAxes >= 1 && e->rglDirection;
+    // direction: with a single axis, rglDirection[0] sign flips the force. Read only with DIEP_DIRECTION (DIEP_ALLPARAMS
+    // includes it): a caller fills only the fields its flags select, so a type-only update may carry an unset direction
+    // pointer (lola 109433). Otherwise the effect keeps its direction.
+    const bool turned = (flags & DIEP_DIRECTION) && e->cAxes >= 1 && e->rglDirection;
     if (scaled) t->gain = float(e->dwGain) / 10000.f;
     if (turned) t->dir = e->rglDirection[0] < 0 ? -1.f : 1.f;
     bool read = false;

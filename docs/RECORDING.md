@@ -155,20 +155,25 @@ and its injection are vendored byte-exact under `src/vendor` (`dinput-proxy/VEND
 - **A recording request fences too** (sana 109034), with no switch needed, and never allows test injection: a
   recording captures an ordinary session. Its process-wide output mute (UDP delivery suppressed until exit) is unchanged.
 - **Force requests behind the fence.** The fence's effect observer feeds the same summaries as the unfenced effect hooks:
-  the strongest constant request with its direction, plus the periodic, spring and damper summaries. Only effects on
-  the tracked wheel count.
+  the strongest constant request with its direction, plus the periodic, spring and damper summaries. The summaries
+  count only effects on the tracked wheel.
   - Values are copied. The game's parameters are never kept; the effect pointer is only an identity key, cleared when
     the effect is finally released.
-  - Every create or parameter write counts as `ffb.mutedWrites` and every Start as `ffb.mutedStarts`. A
+  - `ffb.mutedWrites` and `ffb.mutedStarts` are process-wide, as the latch's guard counters were: every create or
+    parameter write on any fenced device counts as a write, and every Start as a start (lola 109433). A
     `SetParameters` with `DIEP_START` is one write, not a start.
   - A gain-only or direction-only update now recomputes the summary from the request kept per effect (sana 109050).
     Before, a gain-only update left the cached magnitude stale. This applies unfenced as well.
+  - Direction is read only when `DIEP_DIRECTION` is set (`DIEP_ALLPARAMS` includes it). A type-only update keeps the
+    effect's direction and never reads its direction pointer (lola 109433). Before, it was read with the type
+    parameters.
 
 `tools/tests/NativeFence.cpp` (run by `Test-NativeCapture.ps1`) checks these rules with SDK interfaces and no hardware:
 - the switch rules, including a recording that fences without injection;
 - the re-type through the wrapper;
-- the observed requests: the strongest constant with its direction; gain-only and direction-only recomputes;
-  `DIEP_START` as a write; Start counted; the periodic summary; Released clearing each identity;
+- the observed requests: the strongest constant with its direction; gain-only and direction-only recomputes; a
+  type-only write keeping the direction without reading an unflagged (poison) direction pointer; `DIEP_START` as a
+  write; Start counted; the periodic summary; Released clearing each identity;
 - no force route reaching the fake device, and a fenced recording's Acquire writing no property;
 - the read tap once per read, showing the injected values;
 - the unfenced tap unchanged.
