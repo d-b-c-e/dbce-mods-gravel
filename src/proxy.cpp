@@ -40,6 +40,10 @@ static HMODULE g_real = nullptr;
 typedef HRESULT (WINAPI *PFN_Create)(HINSTANCE, DWORD, REFIID, LPVOID *, LPUNKNOWN);
 static bool g_fence = false, g_injectOn = false, g_fencePinned = false;
 static dbce::controls::InjectionTable g_injections;
+// The recording latch's own device-side guards (zero-gain copies, the Acquire property writes, the vtable guards).
+// A recording request now runs behind the fence instead (sana 109034), so these apply only to a recording without it,
+// which this build never starts; the fixtures still exercise them.
+static bool latched() { return recordingMuted() && !g_fence; }
 
 static bool patchVtable(void *obj, int slot, void *hook, void **orig)
 {
@@ -129,18 +133,18 @@ static HRESULT captureQuery(void* self, REFIID requested, REFIID supported, void
     *out = self; return S_OK;
 }
 static HRESULT STDMETHODCALLTYPE HookDeviceQueryW(void* self, REFIID i, void** out) {
-    if (recordingMuted()) return captureQuery(self, i, IID_IDirectInputDevice8W, out);
+    if (latched()) return captureQuery(self, i, IID_IDirectInputDevice8W, out);
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, REFIID, void**))g_oDeviceQueryW)(self, i, out);
 }
 static HRESULT STDMETHODCALLTYPE HookDeviceQueryA(void* self, REFIID i, void** out) {
-    if (recordingMuted()) return captureQuery(self, i, IID_IDirectInputDevice8A, out);
+    if (latched()) return captureQuery(self, i, IID_IDirectInputDevice8A, out);
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, REFIID, void**))g_oDeviceQueryA)(self, i, out);
 }
 
 static HRESULT STDMETHODCALLTYPE HookAcquire(void* self, bool uni)
 {
     auto acquire = (HRESULT (STDMETHODCALLTYPE *)(void*))(uni ? g_oAcquireW : g_oAcquireA);
-    if (recordingMuted()) {
+    if (latched()) {
         // Do this before every acquisition, including focus recovery. A failed
         // guard refuses acquisition. Keyboard/mouse do not have FFB caps.
         DIDEVCAPS caps{}; caps.dwSize = sizeof caps;
@@ -165,13 +169,13 @@ static HRESULT STDMETHODCALLTYPE HookAcquire(void* self, bool uni)
 static HRESULT STDMETHODCALLTYPE HookAcquireW(void* s) { return HookAcquire(s, true); }
 static HRESULT STDMETHODCALLTYPE HookAcquireA(void* s) { return HookAcquire(s, false); }
 static HRESULT STDMETHODCALLTYPE HookCommand(void* s, DWORD command, bool uni) {
-    if (recordingMuted()) return DI_OK; // including ACTUATORSON, CONTINUE, RESET
+    if (latched()) return DI_OK; // including ACTUATORSON, CONTINUE, RESET
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, DWORD))(uni ? g_oCommandW : g_oCommandA))(s, command);
 }
 static HRESULT STDMETHODCALLTYPE HookCommandW(void* s, DWORD c) { return HookCommand(s, c, true); }
 static HRESULT STDMETHODCALLTYPE HookCommandA(void* s, DWORD c) { return HookCommand(s, c, false); }
 static HRESULT STDMETHODCALLTYPE HookDeviceEscape(void* s, LPDIEFFESCAPE e, bool uni) {
-    if (recordingMuted()) return DIERR_UNSUPPORTED;
+    if (latched()) return DIERR_UNSUPPORTED;
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, LPDIEFFESCAPE))(uni ? g_oEscapeW : g_oEscapeA))(s, e);
 }
 static HRESULT STDMETHODCALLTYPE HookDeviceEscapeW(void* s, LPDIEFFESCAPE e) { return HookDeviceEscape(s, e, true); }
@@ -235,7 +239,7 @@ static HRESULT STDMETHODCALLTYPE HookSetFmtA(void *s, LPCDIDATAFORMAT d) { retur
 // whatever range the game actually asked for.
 static HRESULT STDMETHODCALLTYPE HookSetProp(void *self, REFGUID g, LPCDIPROPHEADER h, bool uni)
 {
-    if (recordingMuted() && (&g == &DIPROP_FFGAIN || &g == &DIPROP_AUTOCENTER)) {
+    if (latched() && (&g == &DIPROP_FFGAIN || &g == &DIPROP_AUTOCENTER)) {
         if (!h || h->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
         DIPROPDWORD muted = *(const DIPROPDWORD*)h;
         muted.dwData = 0;
@@ -342,8 +346,10 @@ static HRESULT STDMETHODCALLTYPE HookGetStateA(void *s, DWORD c, LPVOID d) { ret
 enum EffKind { EK_OTHER, EK_CONSTANT, EK_PERIODIC, EK_SPRING, EK_DAMPER, EK_RAMP };
 // The game runs two constant-force effects at once; a single shared value
 // would be whichever updated last, which is usually the smaller of the two.
-// Each effect keeps its own magnitude and the strongest wins.
-struct TrackedEff { void *eff = nullptr; EffKind kind = EK_OTHER; float gain = 1.f; float mag = 0.f; };
+// Each effect keeps its own magnitude and the strongest wins. It also keeps the
+// request's own magnitude before gain (raw) and its direction, so a later
+// gain-only or direction-only update recomputes its summary (sana 109050).
+struct TrackedEff { void *eff = nullptr; EffKind kind = EK_OTHER; float gain = 1.f; float raw = 0.f; float dir = 1.f; bool rawKnown = false; float mag = 0.f; };
 static TrackedEff g_effs[64];
 typedef HRESULT (STDMETHODCALLTYPE *PFN_SetParams)(void *, LPCDIEFFECT, DWORD);
 static void *g_oSetParams = nullptr;
@@ -370,46 +376,65 @@ static const char *kindName(EffKind k)
 static void absorb(TrackedEff *t, LPCDIEFFECT e, DWORD flags)
 {
     if (!e) return;
-    if (flags & DIEP_GAIN) t->gain = float(e->dwGain) / 10000.f;
-    if (!(flags & DIEP_TYPESPECIFICPARAMS) || !e->lpvTypeSpecificParams) return;
-    float g = t->gain * g_cfg.ffbGain;
-    switch (t->kind) {
-    case EK_CONSTANT:
-        if (e->cbTypeSpecificParams >= sizeof(DICONSTANTFORCE)) {
-            LONG m = ((const DICONSTANTFORCE *)e->lpvTypeSpecificParams)->lMagnitude;
-            // direction: with a single axis, rglDirection[0] sign flips the force
-            float dir = (e->cAxes >= 1 && e->rglDirection && e->rglDirection[0] < 0) ? -1.f : 1.f;
-            t->mag = float(m) / 10000.f * dir * g;
+    const bool typed = (flags & DIEP_TYPESPECIFICPARAMS) && e->lpvTypeSpecificParams;
+    const bool scaled = (flags & DIEP_GAIN) != 0;
+    // direction: with a single axis, rglDirection[0] sign flips the force (read with the type parameters, as before,
+    // or alone with DIEP_DIRECTION)
+    const bool turned = (flags & (DIEP_DIRECTION | DIEP_TYPESPECIFICPARAMS)) && e->cAxes >= 1 && e->rglDirection;
+    if (scaled) t->gain = float(e->dwGain) / 10000.f;
+    if (turned) t->dir = e->rglDirection[0] < 0 ? -1.f : 1.f;
+    bool read = false;
+    if (typed) {
+        switch (t->kind) {
+        case EK_CONSTANT:
+            if (e->cbTypeSpecificParams >= sizeof(DICONSTANTFORCE)) { t->raw = float(((const DICONSTANTFORCE *)e->lpvTypeSpecificParams)->lMagnitude) / 10000.f; read = true; }
+            break;
+        case EK_PERIODIC:
+            if (e->cbTypeSpecificParams >= sizeof(DIPERIODIC)) { t->raw = float(((const DIPERIODIC *)e->lpvTypeSpecificParams)->dwMagnitude) / 10000.f; read = true; }
+            break;
+        case EK_SPRING: case EK_DAMPER:
+            if (e->cbTypeSpecificParams >= sizeof(DICONDITION)) {
+                const DICONDITION *c = (const DICONDITION *)e->lpvTypeSpecificParams;
+                LONG a = c->lPositiveCoefficient < 0 ? -c->lPositiveCoefficient : c->lPositiveCoefficient;
+                LONG b = c->lNegativeCoefficient < 0 ? -c->lNegativeCoefficient : c->lNegativeCoefficient;
+                t->raw = float(a > b ? a : b) / 10000.f; read = true;
+            }
+            break;
+        case EK_RAMP:
+            if (e->cbTypeSpecificParams >= sizeof(DIRAMPFORCE)) { t->raw = float(((const DIRAMPFORCE *)e->lpvTypeSpecificParams)->lEnd) / 10000.f; read = true; }
+            break;
+        default: break;
+        }
+        if (read) t->rawKnown = true;
+    }
+    const bool recompute = read || (t->rawKnown && (scaled || turned));
+    if (!typed && !recompute) return;   // nothing this summary depends on changed
+    if (recompute) {
+        float g = t->gain * g_cfg.ffbGain;
+        switch (t->kind) {
+        case EK_CONSTANT: {
+            t->mag = t->raw * t->dir * g;
             float best = 0.f;
             for (const auto &o : g_effs)
                 if (o.eff && o.kind == EK_CONSTANT && fabsf(o.mag) > fabsf(best)) best = o.mag;
             g_ffb.constant = best;
             g_ffb.summaryAt[0] = GetTickCount64();
+            break;
         }
-        break;
-    case EK_PERIODIC:
-        if (e->cbTypeSpecificParams >= sizeof(DIPERIODIC)) {
-            g_ffb.periodic = float(((const DIPERIODIC *)e->lpvTypeSpecificParams)->dwMagnitude) / 10000.f * g;
+        case EK_PERIODIC:
+            g_ffb.periodic = t->raw * g;
             g_ffb.summaryAt[1] = GetTickCount64();
-        }
-        break;
-    case EK_SPRING: case EK_DAMPER:
-        if (e->cbTypeSpecificParams >= sizeof(DICONDITION)) {
-            const DICONDITION *c = (const DICONDITION *)e->lpvTypeSpecificParams;
-            LONG a = c->lPositiveCoefficient < 0 ? -c->lPositiveCoefficient : c->lPositiveCoefficient;
-            LONG b = c->lNegativeCoefficient < 0 ? -c->lNegativeCoefficient : c->lNegativeCoefficient;
-            float v = float(a > b ? a : b) / 10000.f * g;
-            if (t->kind == EK_SPRING) g_ffb.spring = v; else g_ffb.damper = v;
+            break;
+        case EK_SPRING: case EK_DAMPER:
+            if (t->kind == EK_SPRING) g_ffb.spring = t->raw * g; else g_ffb.damper = t->raw * g;
             g_ffb.summaryAt[t->kind == EK_SPRING ? 2 : 3] = GetTickCount64();
-        }
-        break;
-    case EK_RAMP:
-        if (e->cbTypeSpecificParams >= sizeof(DIRAMPFORCE)) {
-            g_ffb.constant = float(((const DIRAMPFORCE *)e->lpvTypeSpecificParams)->lEnd) / 10000.f * g;
+            break;
+        case EK_RAMP:
+            g_ffb.constant = t->raw * g;
             g_ffb.summaryAt[0] = GetTickCount64();
+            break;
+        default: break;
         }
-        break;
-    default: break;
     }
     g_ffb.live = true;
     g_ffb.observedAt = GetTickCount64();
@@ -422,7 +447,7 @@ static HRESULT STDMETHODCALLTYPE HookSetParams(void *self, LPCDIEFFECT e, DWORD 
     for (auto &t : g_effs)
         if (t.eff == self) { absorb(&t, e, flags); break; }
     ReleaseSRWLockExclusive(&g_effectLock);
-    if (recordingMuted()) {
+    if (latched()) {
         dbce::dproxy::MutedEffectWrite muted;
         if (!muted.copy(e, flags)) return DIERR_INVALIDPARAM;
         ++g_ffb.mutedWrites;
@@ -431,15 +456,15 @@ static HRESULT STDMETHODCALLTYPE HookSetParams(void *self, LPCDIEFFECT e, DWORD 
     return ((PFN_SetParams)g_oSetParams)(self, e, flags);
 }
 static HRESULT STDMETHODCALLTYPE HookEffectStart(void* self, DWORD iterations, DWORD flags) {
-    if (recordingMuted()) { ++g_ffb.mutedStarts; return DI_OK; }
+    if (latched()) { ++g_ffb.mutedStarts; return DI_OK; }
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, DWORD, DWORD))g_oEffectStart)(self, iterations, flags);
 }
 static HRESULT STDMETHODCALLTYPE HookEffectEscape(void* self, LPDIEFFESCAPE e) {
-    if (recordingMuted()) return DIERR_UNSUPPORTED;
+    if (latched()) return DIERR_UNSUPPORTED;
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, LPDIEFFESCAPE))g_oEffectEscape)(self, e);
 }
 static HRESULT STDMETHODCALLTYPE HookEffectQuery(void* self, REFIID i, void** out) {
-    if (recordingMuted()) return captureQuery(self, i, IID_IDirectInputEffect, out);
+    if (latched()) return captureQuery(self, i, IID_IDirectInputEffect, out);
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, REFIID, void**))g_oEffectQuery)(self, i, out);
 }
 
@@ -447,14 +472,14 @@ static HRESULT STDMETHODCALLTYPE HookCreateEffect(void *self, REFGUID guid, LPCD
                                                   LPDIRECTINPUTEFFECT *out, LPUNKNOWN unk, bool uni)
 {
     dbce::dproxy::MutedEffectWrite muted;
-    if (recordingMuted() && e && !muted.copy(e, DIEP_ALLPARAMS)) return DIERR_INVALIDPARAM;
+    if (latched() && e && !muted.copy(e, DIEP_ALLPARAMS)) return DIERR_INVALIDPARAM;
     HRESULT hr = ((PFN_CreateEffect)(uni ? g_oCreateEffW : g_oCreateEffA))(self, guid,
-        recordingMuted() && e ? &muted.effect : e, out, unk);
+        latched() && e ? &muted.effect : e, out, unk);
     if (FAILED(hr) || !out || !*out)
         return hr;
     // Guard every effect, not just the selected telemetry device. A missing
     // vtable guard refuses the zero-gain handle before the game can use it.
-    if (recordingMuted()) {
+    if (latched()) {
         bool guarded = patchVtable(*out, 6, (void*)HookSetParams, &g_oSetParams);
         guarded = patchVtable(*out, 7, (void*)HookEffectStart, &g_oEffectStart) && guarded;
         guarded = patchVtable(*out, 12, (void*)HookEffectEscape, &g_oEffectEscape) && guarded;
@@ -467,7 +492,7 @@ static HRESULT STDMETHODCALLTYPE HookCreateEffect(void *self, REFGUID guid, LPCD
     bool tracked = false;
     for (auto &t : g_effs) {
         if (t.eff && t.eff != *out) continue;
-        t.eff = *out; t.kind = kindOf(guid); t.gain = 1.f;
+        t = TrackedEff{}; t.eff = *out; t.kind = kindOf(guid);
         patchVtable(*out, 6, (void *)HookSetParams, &g_oSetParams);   // IDirectInputEffect::SetParameters
         absorb(&t, e, DIEP_ALLPARAMS);
         ++g_ffb.effects;
@@ -478,6 +503,42 @@ static HRESULT STDMETHODCALLTYPE HookCreateEffect(void *self, REFGUID guid, LPCD
     if (!tracked) ++g_ffb.tableOverflow;
     ReleaseSRWLockExclusive(&g_effectLock);
     return hr;
+}
+// Fenced, the game's original force requests come from the fence's software effects (Settings::observeEffect, sana
+// 109034), for the tracked wheel only, as HookCreateEffect/HookSetParams take them unfenced. Values are copied by absorb;
+// the parameters are never kept, and the effect pointer is only an identity key, never called, cleared at Released. Every
+// write and start is one the fence kept from the device, so they count as muted. A Parameters event with DIEP_START is
+// one write, not a start.
+static void observeEffectFenced(const void *device, const void *effect, REFGUID type, dbce::fence::EffectEvent event,
+                                LPCDIEFFECT params, DWORD flags, DWORD)
+{
+    using Event = dbce::fence::EffectEvent;
+    void *key = const_cast<void *>(effect);
+    if (event == Event::Start) { ++g_ffb.mutedStarts; return; }
+    if (event == Event::Stop) return;
+    AcquireSRWLockExclusive(&g_effectLock);
+    if (event == Event::Released) {
+        for (auto &t : g_effs) if (t.eff == key) t = TrackedEff{};
+    } else if (event == Event::Parameters) {
+        ++g_ffb.mutedWrites;
+        for (auto &t : g_effs) if (t.eff == key) { absorb(&t, params, flags); break; }
+    } else if (event == Event::Created) {
+        ++g_ffb.mutedWrites;
+        if (findDev(const_cast<void *>(device))) {
+            bool tracked = false;
+            for (auto &t : g_effs) {
+                if (t.eff && t.eff != key) continue;
+                t = TrackedEff{}; t.eff = key; t.kind = kindOf(type);
+                absorb(&t, params, flags);
+                ++g_ffb.effects;
+                logf("[ffb] effect created behind the fence: %s (#%u)", kindName(t.kind), (unsigned)g_ffb.effects);
+                tracked = true;
+                break;
+            }
+            if (!tracked) ++g_ffb.tableOverflow;
+        }
+    }
+    ReleaseSRWLockExclusive(&g_effectLock);
 }
 static HRESULT STDMETHODCALLTYPE HookCreateEffW(void *s, REFGUID g, LPCDIEFFECT e, LPDIRECTINPUTEFFECT *o, LPUNKNOWN u) { return HookCreateEffect(s, g, e, o, u, true); }
 static HRESULT STDMETHODCALLTYPE HookCreateEffA(void *s, REFGUID g, LPCDIEFFECT e, LPDIRECTINPUTEFFECT *o, LPUNKNOWN u) { return HookCreateEffect(s, g, e, o, u, false); }
@@ -519,7 +580,7 @@ static bool hookDevice(void *dev, bool uni)
         patchVtable(dev, 18, (void *)HookCreateEffW, &g_oCreateEffW);
         patchVtable(dev,  6, (void *)HookSetPropW,   &g_oSetPropW);
         if (!g_oGetPropW) g_oGetPropW = (*(void ***)dev)[5];
-        if (recordingMuted()) {
+        if (latched()) {
             guarded = patchVtable(dev, 0, (void*)HookDeviceQueryW, &g_oDeviceQueryW) && guarded;
             guarded = patchVtable(dev, 3, (void*)HookGetCapsW, &g_oGetCapsW) && guarded;
             guarded = patchVtable(dev, 6, (void*)HookSetPropW, &g_oSetPropW) && guarded;
@@ -536,7 +597,7 @@ static bool hookDevice(void *dev, bool uni)
         patchVtable(dev, 18, (void *)HookCreateEffA, &g_oCreateEffA);
         patchVtable(dev,  6, (void *)HookSetPropA,   &g_oSetPropA);
         if (!g_oGetPropA) g_oGetPropA = (*(void ***)dev)[5];
-        if (recordingMuted()) {
+        if (latched()) {
             guarded = patchVtable(dev, 0, (void*)HookDeviceQueryA, &g_oDeviceQueryA) && guarded;
             guarded = patchVtable(dev, 3, (void*)HookGetCapsA, &g_oGetCapsA) && guarded;
             guarded = patchVtable(dev, 6, (void*)HookSetPropA, &g_oSetPropA) && guarded;
@@ -588,7 +649,7 @@ static BOOL CALLBACK ShimSemanticsA(LPCDIDEVICEINSTANCEA info, LPDIRECTINPUTDEVI
 }
 static HRESULT STDMETHODCALLTYPE HookSemanticsW(void* self, LPCWSTR user, LPDIACTIONFORMATW map, LPDIENUMDEVICESBYSEMANTICSCBW cb, void* ref, DWORD flags) {
     using Fn=HRESULT(STDMETHODCALLTYPE*)(void*,LPCWSTR,LPDIACTIONFORMATW,LPDIENUMDEVICESBYSEMANTICSCBW,void*,DWORD);
-    if (!recordingMuted()) return ((Fn)g_oSemanticsW)(self,user,map,cb,ref,flags);
+    if (!latched()) return ((Fn)g_oSemanticsW)(self,user,map,cb,ref,flags);
     if (!cb) return DIERR_INVALIDPARAM;
     SemanticsW c{cb,ref};
     HRESULT hr=((Fn)g_oSemanticsW)(self,user,map,ShimSemanticsW,&c,flags);
@@ -596,7 +657,7 @@ static HRESULT STDMETHODCALLTYPE HookSemanticsW(void* self, LPCWSTR user, LPDIAC
 }
 static HRESULT STDMETHODCALLTYPE HookSemanticsA(void* self, LPCSTR user, LPDIACTIONFORMATA map, LPDIENUMDEVICESBYSEMANTICSCBA cb, void* ref, DWORD flags) {
     using Fn=HRESULT(STDMETHODCALLTYPE*)(void*,LPCSTR,LPDIACTIONFORMATA,LPDIENUMDEVICESBYSEMANTICSCBA,void*,DWORD);
-    if (!recordingMuted()) return ((Fn)g_oSemanticsA)(self,user,map,cb,ref,flags);
+    if (!latched()) return ((Fn)g_oSemanticsA)(self,user,map,cb,ref,flags);
     if (!cb) return DIERR_INVALIDPARAM;
     SemanticsA c{cb,ref};
     HRESULT hr=((Fn)g_oSemanticsA)(self,user,map,ShimSemanticsA,&c,flags);
@@ -605,19 +666,19 @@ static HRESULT STDMETHODCALLTYPE HookSemanticsA(void* self, LPCSTR user, LPDIACT
 // Configuration UI can create/configure further devices internally. A bounded
 // recording does not enter this unqualified route; ordinary launches pass it on.
 static HRESULT STDMETHODCALLTYPE HookConfigureW(void* self, LPDICONFIGUREDEVICESCALLBACK cb, LPDICONFIGUREDEVICESPARAMSW p, DWORD flags, void* ref) {
-    if (recordingMuted()) return DIERR_UNSUPPORTED;
+    if (latched()) return DIERR_UNSUPPORTED;
     return ((HRESULT(STDMETHODCALLTYPE*)(void*,LPDICONFIGUREDEVICESCALLBACK,LPDICONFIGUREDEVICESPARAMSW,DWORD,void*))g_oConfigureW)(self,cb,p,flags,ref);
 }
 static HRESULT STDMETHODCALLTYPE HookConfigureA(void* self, LPDICONFIGUREDEVICESCALLBACK cb, LPDICONFIGUREDEVICESPARAMSA p, DWORD flags, void* ref) {
-    if (recordingMuted()) return DIERR_UNSUPPORTED;
+    if (latched()) return DIERR_UNSUPPORTED;
     return ((HRESULT(STDMETHODCALLTYPE*)(void*,LPDICONFIGUREDEVICESCALLBACK,LPDICONFIGUREDEVICESPARAMSA,DWORD,void*))g_oConfigureA)(self,cb,p,flags,ref);
 }
 static HRESULT STDMETHODCALLTYPE HookInputQueryW(void* self, REFIID i, void** out) {
-    if (recordingMuted()) return captureQuery(self, i, IID_IDirectInput8W, out);
+    if (latched()) return captureQuery(self, i, IID_IDirectInput8W, out);
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, REFIID, void**))g_oInputQueryW)(self, i, out);
 }
 static HRESULT STDMETHODCALLTYPE HookInputQueryA(void* self, REFIID i, void** out) {
-    if (recordingMuted()) return captureQuery(self, i, IID_IDirectInput8A, out);
+    if (latched()) return captureQuery(self, i, IID_IDirectInput8A, out);
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, REFIID, void**))g_oInputQueryA)(self, i, out);
 }
 static bool hookInput(void* object, REFIID iid) {
@@ -625,7 +686,7 @@ static bool hookInput(void* object, REFIID iid) {
     if (IsEqualIID(iid, IID_IDirectInput8W)) {
         ok = patchVtable(object, 4, (void*)HookEnumW, &g_oEnumW) && ok;
         ok = patchVtable(object, 3, (void*)HookCreateW, &g_oCreateW) && ok;
-        if (recordingMuted()) {
+        if (latched()) {
             ok = patchVtable(object, 0, (void*)HookInputQueryW, &g_oInputQueryW) && ok;
             ok = patchVtable(object, 9, (void*)HookSemanticsW, &g_oSemanticsW) && ok;
             ok = patchVtable(object, 10, (void*)HookConfigureW, &g_oConfigureW) && ok;
@@ -633,13 +694,13 @@ static bool hookInput(void* object, REFIID iid) {
     } else if (IsEqualIID(iid, IID_IDirectInput8A)) {
         ok = patchVtable(object, 4, (void*)HookEnumA, &g_oEnumA) && ok;
         ok = patchVtable(object, 3, (void*)HookCreateA, &g_oCreateA) && ok;
-        if (recordingMuted()) {
+        if (latched()) {
             ok = patchVtable(object, 0, (void*)HookInputQueryA, &g_oInputQueryA) && ok;
             ok = patchVtable(object, 9, (void*)HookSemanticsA, &g_oSemanticsA) && ok;
             ok = patchVtable(object, 10, (void*)HookConfigureA, &g_oConfigureA) && ok;
         }
     } else ok = false;
-    return !recordingMuted() || ok;
+    return !latched() || ok;
 }
 
 class CaptureFactory final : public IClassFactory {
@@ -678,20 +739,22 @@ static bool exeIsGravel()
     return _stricmp(leaf ? leaf + 1 : path, "gravel-Win64-Shipping.exe") == 0;
 }
 
-// STD-033 switches, read once at start (dbce_test_switches.hpp). A recording request has latched its own mute by now and
-// excludes the fence: its zero-gain path still reaches the device, and its open gaps stay documented (docs/RECORDING.md).
+// STD-033 switches, read once at start (dbce_test_switches.hpp). A recording request (latched by now) also runs behind the
+// fence, with its force requests observed in software (sana 109034), and never with test injection: it records an
+// ordinary session.
 static void fenceInit()
 {
-    const bool requested = dbce::testing::switchFile("gravel", "ffb-fence.on");
-    if (requested && recordingMuted()) { logf("[proxy] ffb-fence.on ignored: a recording request latched its own mute"); return; }
-    if (!requested) return;
+    const bool requested = dbce::testing::switchFile("gravel", "ffb-fence.on"), recording = recordingMuted();
+    if (!requested && !recording) return;
     g_fence = true;
     g_fencePinned = exeIsGravel();
-    g_injectOn = dbce::testing::switchFile("gravel", "inject.on");
+    g_injectOn = !recording && dbce::testing::switchFile("gravel", "inject.on");
     dbce::fence::settings().log = [](const char *line) { logf("%s", line); };
     dbce::fence::settings().observe = observeFenced;
+    dbce::fence::settings().observeEffect = observeEffectFenced;
     if (g_injectOn) dbce::fence::settings().injections = &g_injections;
-    logf("[proxy] force feedback FENCED (ffb-fence.on): devices visible, no force can reach one%s%s",
+    logf("[proxy] force feedback FENCED (%s): devices visible, no force can reach one%s%s",
+         recording ? "recording request; force requests observed in software" : "ffb-fence.on",
          g_injectOn ? "; test injection allowed (inject.on)" : "", g_fencePinned ? "" : "; not gravel-Win64-Shipping.exe, so DirectInput is refused");
     if (g_injectOn && g_fencePinned) {
         char ini[MAX_PATH]; sidecarPath(ini, "milestone_mod.ini");
@@ -734,7 +797,7 @@ extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE h, DWORD ver, REFIID riid
 {
     proxyInit();
     if (g_fence) return dbce::testing::CreateFencedDirectInput(CreateHookedDirectInput, h, ver, riid, out, unk, g_fencePinned);
-    if (recordingMuted() && (unk || (!IsEqualIID(riid,IID_IDirectInput8W) && !IsEqualIID(riid,IID_IDirectInput8A)))) {
+    if (latched() && (unk || (!IsEqualIID(riid,IID_IDirectInput8W) && !IsEqualIID(riid,IID_IDirectInput8A)))) {
         if (out) *out=nullptr;
         return E_NOINTERFACE;
     }
@@ -748,7 +811,7 @@ extern "C" HRESULT WINAPI DllGetClassObject(REFCLSID cls, REFIID iid, void** out
     using GetClass = HRESULT (WINAPI *)(REFCLSID, REFIID, void**);
     auto real = (GetClass)(g_real ? GetProcAddress(g_real,"DllGetClassObject") : nullptr);
     if (!real) return E_FAIL;
-    if (!recordingMuted()) return real(cls,iid,out);
+    if (!latched()) return real(cls,iid,out);
     if (!out) return E_POINTER;
     *out=nullptr;
     if (!IsEqualCLSID(cls,CLSID_DirectInput8)) return CLASS_E_CLASSNOTAVAILABLE;

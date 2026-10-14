@@ -103,6 +103,9 @@ qualification fields remain false. It does not launch a game or drive a device.
 Gravel is **not** cleared for unattended wheel runs: placement and other checks stay attended, or wait for a qualified
 mute (sana 90041). What exists and what is open:
 
+- **Since the effect observer (source after `c7ed00c`, sana 109034), a recording request runs behind the fence** (see
+  "Force fence" below). The latch's device-side guards described next remain in source only for a recording without
+  the fence, which this build never starts. They describe the **installed** `B35F4D0B` build.
 - **The latch.** Any `milestone_recording.request.ini` beside the DLL latches `recordingMuted()` for the whole process
   (`src/recording.cpp`, `recordingInit`), including a malformed or expired request, which logs "invalid/expired
   request; ... outputs muted" and captures nothing. While latched, the proxy guards the DirectInput surface: guarded
@@ -113,15 +116,18 @@ mute (sana 90041). What exists and what is open:
 - **Open: device-property restoration** after the latched session, and the **live acquisition path** (acquire,
   unacquire and re-acquire on the real device). Fake tests cannot prove either; the capture inspector keeps reporting
   `hardwareMuteQualified=false`.
+  - Behind the fence, a recording writes no force gain and creates no effect on the device.
+  - The game's own auto-centring off is still forwarded, and the live acquisition path is still unproven.
+  - So `hardwareMuteQualified` stays false until the fence's live probe and a runtime check on Gravel.
 - **COM activation (supporting evidence only).** A read-only scan on 2026-10-14 found neither `CLSID_DirectInput8`
   nor `CLSID_DirectInputDevice8` in `gravel-Win64-Shipping.exe` (`28032B88`), which imports `DirectInput8Create` from
   `DINPUT8.dll`, nor in the other game-folder modules that import `CoCreateInstance` (TrueSky, FMOD). That makes a
   registry activation of DirectInput unlikely, but it is **not proof** that no COM path exists: a GUID built at run
   time, or a module loaded from outside the game folder (the Steam overlay, drivers), is not excluded.
-- **Not reused for recording.** The toolkit's `DBCE_FFB_MUTE` is a contract (STD-035 item 8), not a native facility.
-  The toolkit's dinput8 fence is now adopted for unattended control runs (below), but not for recording: under the
-  fence the game's effects are software sinks the proxy never sees, so a capture would lose its original force
-  observations. A recording request therefore keeps the latch above, with its open gaps, and excludes the fence.
+- **Recording behind the fence.** The toolkit's `DBCE_FFB_MUTE` is a contract (STD-035 item 8), not a native facility.
+  The dinput8 fence used to hide the game's effects from the proxy (software sinks), which is why `c7ed00c` kept
+  recording on the latch. The fence's effect observer (`Settings::observeEffect`, toolkit `150fcd5`) now reports the
+  game's original requests, so a recording keeps its force observations behind the fence.
 
 ## Force fence for unattended control runs (2026-10-14, sana 107988)
 
@@ -146,12 +152,24 @@ and its injection are vendored byte-exact under `src/vendor` (`dinput-proxy/VEND
   must show consumption.
 - **Standard formats only.** Injection and observation apply only when the game reads with `c_dfDIJoystick` or
   `c_dfDIJoystick2`. A custom format gets neither, and the fence logs it once.
-- **A recording request wins.** With a recording request the switch is ignored and logged; the recording latch applies.
+- **A recording request fences too** (sana 109034), with no switch needed, and never allows test injection: a
+  recording captures an ordinary session. Its process-wide output mute (UDP delivery suppressed until exit) is unchanged.
+- **Force requests behind the fence.** The fence's effect observer feeds the same summaries as the unfenced effect hooks:
+  the strongest constant request with its direction, plus the periodic, spring and damper summaries. Only effects on
+  the tracked wheel count.
+  - Values are copied. The game's parameters are never kept; the effect pointer is only an identity key, cleared when
+    the effect is finally released.
+  - Every create or parameter write counts as `ffb.mutedWrites` and every Start as `ffb.mutedStarts`. A
+    `SetParameters` with `DIEP_START` is one write, not a start.
+  - A gain-only or direction-only update now recomputes the summary from the request kept per effect (sana 109050).
+    Before, a gain-only update left the cached magnitude stale. This applies unfenced as well.
 
 `tools/tests/NativeFence.cpp` (run by `Test-NativeCapture.ps1`) checks these rules with SDK interfaces and no hardware:
-- the switch rules;
+- the switch rules, including a recording that fences without injection;
 - the re-type through the wrapper;
-- no force route reaching the fake device;
+- the observed requests: the strongest constant with its direction; gain-only and direction-only recomputes;
+  `DIEP_START` as a write; Start counted; the periodic summary; Released clearing each identity;
+- no force route reaching the fake device, and a fenced recording's Acquire writing no property;
 - the read tap once per read, showing the injected values;
 - the unfenced tap unchanged.
 

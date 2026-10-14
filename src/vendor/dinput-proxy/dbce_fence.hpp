@@ -19,7 +19,8 @@
 // Test injection (dbce_inject_table.hpp) is delivered in FencedDevice::GetDeviceState, keyed by the instance GUID that
 // DirectInput reports for the created device. Buffered GetDeviceData reads are forwarded without injection.
 // Pedal rest shaping (dbce_shape_state.hpp), when a proxy sets one, runs in the same place after injection. An observer
-// (Settings::observe), when a proxy sets one, then sees the final standard-format state: what the game receives.
+// (Settings::observe), when a proxy sets one, then sees the final standard-format state: what the game receives. An
+// effect observer (Settings::observeEffect) sees the game's original force requests as the software effects keep them.
 #pragma once
 #ifndef DIRECTINPUT_VERSION
 #define DIRECTINPUT_VERSION 0x0800
@@ -39,6 +40,9 @@
 
 namespace dbce { namespace fence {
 
+// What the game asked of one software effect (Settings::observeEffect).
+enum class EffectEvent { Created, Parameters, Start, Stop, Released };
+
 // Process-wide settings, set once before DirectInput8Create is answered.
 struct Settings {
     void (*log)(const char *line) = nullptr;
@@ -49,6 +53,15 @@ struct Settings {
     // DIJOYSTATE2), once injection and shaping are applied. `device` is the wrapped device, for identity only; `state` is
     // borrowed and read-only for the call. Never called for a failed, null, custom-format or mis-sized read. nullptr: none.
     void (*observe)(const void *device, int format, DWORD cb, const void *state) = nullptr;
+    // The game's original force requests, for a proxy that records them (Gravel's signal capture, sana 109034): called on
+    // the caller's thread as each software effect is created, given parameters, started, stopped and finally released.
+    // `device` (the wrapped device) and `effect` (the software effect) are borrowed identities only: never owned, never
+    // to be called; an effect's identity ends at its single Released. `params` is the game's own DIEFFECT, read only and
+    // borrowed for the call: Created (flags DIEP_ALLPARAMS, or 0 with no parameters) and Parameters (the game's flags,
+    // DIEP_START included, as one event). Start passes its flags and the iteration count in `value`. Nothing is forwarded
+    // to a device, and a throwing observer changes no result. nullptr: none.
+    void (*observeEffect)(const void *device, const void *effect, REFGUID type, EffectEvent event, LPCDIEFFECT params,
+                          DWORD flags, DWORD value) = nullptr;
 };
 inline Settings &settings() { static Settings s; return s; }
 
@@ -73,12 +86,24 @@ inline std::string guidText(const GUID &g)
     return b;
 }
 
+// The observers run inside the game's COM calls: whatever one throws stays here, so no result, refcount or release
+// changes because of it (sana 109034).
+inline void observeEffect(const void *device, const void *effect, REFGUID type, EffectEvent event, LPCDIEFFECT params, DWORD flags,
+                          DWORD value)
+{
+    const auto o = settings().observeEffect;
+    if (!o) return;
+    try { o(device, effect, type, event, params, flags, value); }
+    catch (...) { static volatile LONG n; if (sample(n)) logf("fence: an effect observer threw; ignored"); }
+}
+
 // ---- the sink effect: the game's effect object, kept entirely in software -------------------------------------------
 struct SinkEffect final : IDirectInputEffect {
     volatile LONG refs = 1;
     GUID type;
+    const void *device;   // the wrapped device, for the effect observer's identity only
     DIEFFECT kept{};   // the scalar fields the game last set (no pointers kept)
-    explicit SinkEffect(REFGUID g) : type(g) { kept.dwSize = sizeof kept; }
+    SinkEffect(REFGUID g, const void *dev) : type(g), device(dev) { kept.dwSize = sizeof kept; }
     void keep(LPCDIEFFECT e, DWORD flags)
     {
         if (!e) return;
@@ -98,7 +123,12 @@ struct SinkEffect final : IDirectInputEffect {
         return E_NOINTERFACE;
     }
     STDMETHODIMP_(ULONG) AddRef() override { return (ULONG)InterlockedIncrement(&refs); }
-    STDMETHODIMP_(ULONG) Release() override { LONG n = InterlockedDecrement(&refs); if (n == 0) delete this; return (ULONG)n; }
+    STDMETHODIMP_(ULONG) Release() override
+    {
+        LONG n = InterlockedDecrement(&refs);
+        if (n == 0) { observeEffect(device, this, type, EffectEvent::Released, nullptr, 0, 0); delete this; }
+        return (ULONG)n;
+    }
     STDMETHODIMP Initialize(HINSTANCE, DWORD, REFGUID) override { return DI_OK; }
     STDMETHODIMP GetEffectGuid(LPGUID g) override { if (!g) return E_POINTER; *g = type; return DI_OK; }
     STDMETHODIMP GetParameters(LPDIEFFECT e, DWORD flags) override
@@ -116,16 +146,18 @@ struct SinkEffect final : IDirectInputEffect {
     {
         static volatile LONG n;
         keep(e, flags);
+        observeEffect(device, this, type, EffectEvent::Parameters, e, flags, 0);   // DIEP_START stays part of this one event
         if (sample(n)) logf("fence: effect SetParameters flags=0x%lx kept in software, not sent to the device", flags);
         return DI_OK;
     }
-    STDMETHODIMP Start(DWORD iterations, DWORD) override
+    STDMETHODIMP Start(DWORD iterations, DWORD flags) override
     {
         static volatile LONG n;
+        observeEffect(device, this, type, EffectEvent::Start, nullptr, flags, iterations);
         if (sample(n)) logf("fence: effect Start (%lu) not sent to the device", iterations);
         return DI_OK;
     }
-    STDMETHODIMP Stop() override { return DI_OK; }
+    STDMETHODIMP Stop() override { observeEffect(device, this, type, EffectEvent::Stop, nullptr, 0, 0); return DI_OK; }
     STDMETHODIMP GetEffectStatus(LPDWORD s) override { if (!s) return E_POINTER; *s = 0; return DI_OK; }   // not playing
     STDMETHODIMP Download() override { return DI_OK; }
     STDMETHODIMP Unload() override { return DI_OK; }
@@ -227,7 +259,10 @@ struct FencedDevice final : I {
                 [](const dbce::controls::PedalShape &s, dbce::controls::ShapeMiss m, long mn, long mx) { logf("%s", dbce::shape::firstLine(s, m, mn, mx).c_str()); });
         if (const auto observe = settings().observe) {
             const LONG f = format;
-            if ((f == 1 && cb == sizeof(DIJOYSTATE)) || (f == 2 && cb == sizeof(DIJOYSTATE2))) observe(real, (int)f, cb, data);
+            if ((f == 1 && cb == sizeof(DIJOYSTATE)) || (f == 2 && cb == sizeof(DIJOYSTATE2))) {
+                try { observe(real, (int)f, cb, data); }
+                catch (...) { static volatile LONG n; if (sample(n)) logf("fence: a state observer threw; ignored"); }
+            }
         }
         return hr;
     }
@@ -250,9 +285,10 @@ struct FencedDevice final : I {
         if (!out) return E_POINTER;
         *out = nullptr;
         if (outer) return refuse("CreateEffect with aggregation");
-        auto *sink = new (std::nothrow) SinkEffect(g);
+        auto *sink = new (std::nothrow) SinkEffect(g, real);
         if (!sink) return E_OUTOFMEMORY;
         sink->keep(e, e ? DIEP_ALLPARAMS : 0);
+        observeEffect(real, sink, g, EffectEvent::Created, e, e ? DIEP_ALLPARAMS : 0, 0);
         *out = sink;
         if (sample(n)) logf("fence: CreateEffect answered with a software effect; nothing created on the device");
         return DI_OK;

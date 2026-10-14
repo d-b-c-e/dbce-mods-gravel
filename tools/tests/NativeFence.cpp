@@ -113,11 +113,13 @@ int main() {
     CreateDirectoryW(g_dir.c_str(),nullptr); CreateDirectoryW((g_dir+L"\\dbce").c_str(),nullptr); CreateDirectoryW((g_dir+L"\\dbce\\gravel").c_str(),nullptr);
     SetEnvironmentVariableW(L"LOCALAPPDATA",g_dir.c_str());
     fenceInit();
-    assert(!g_fence && !g_injectOn && !dbce::fence::settings().observe);   // no switch: the ordinary proxy
-    switchOn(L"ffb-fence.on",true); recording=true; fenceInit();
-    assert(!g_fence && !dbce::fence::settings().observe);                   // a recording request keeps its own latch
-    recording=false; fenceInit();
-    assert(g_fence && !g_injectOn && !g_fencePinned && dbce::fence::settings().observe && !dbce::fence::settings().injections);
+    assert(!g_fence && !g_injectOn && !dbce::fence::settings().observe && !dbce::fence::settings().observeEffect);   // no switch: the ordinary proxy
+    // A recording request runs behind the fence with its force requests observed (sana 109034), never with injection.
+    switchOn(L"inject.on",true); recording=true; fenceInit();
+    assert(g_fence && !g_injectOn && !latched() && dbce::fence::settings().observe && dbce::fence::settings().observeEffect && !dbce::fence::settings().injections);
+    resetFence(); switchOn(L"inject.on",false); recording=false;
+    switchOn(L"ffb-fence.on",true); fenceInit();
+    assert(g_fence && !g_injectOn && !g_fencePinned && dbce::fence::settings().observe && dbce::fence::settings().observeEffect && !dbce::fence::settings().injections);
     resetFence(); switchOn(L"inject.on",true); fenceInit();
     assert(g_fence && g_injectOn && dbce::fence::settings().injections==&g_injections);
     // Not gravel-Win64-Shipping.exe (this fixture): DirectInput is refused before the system call.
@@ -143,14 +145,45 @@ int main() {
     DIDEVCAPS caps{}; caps.dwSize=sizeof caps;
     assert(SUCCEEDED(dev->GetCapabilities(&caps)) && (caps.dwDevType&0xFF)==DI8DEVTYPE_DRIVING && (caps.dwFlags&DIDC_FORCEFEEDBACK));
 
-    // No force route reaches the device.
+    // No force route reaches the device, and the game's original requests are observed (sana 109034/109050).
     DICONSTANTFORCE constant{7500}; DWORD axis=DIJOFS_X; LONG direction=1;
     DIEFFECT e{}; e.dwSize=sizeof e; e.dwGain=10000; e.cAxes=1; e.rgdwAxes=&axis; e.rglDirection=&direction;
     e.cbTypeSpecificParams=sizeof constant; e.lpvTypeSpecificParams=&constant;
     LPDIRECTINPUTEFFECT effect=nullptr;
     assert(SUCCEEDED(dev->CreateEffect(GUID_ConstantForce,&e,&effect,nullptr)) && effect);
-    assert(SUCCEEDED(effect->Start(1,0)));
-    effect->Release();
+    assert(g_ffb.effects.load()==1 && g_ffb.mutedWrites.load()==1 && std::abs(g_ffb.constant.load()-.75f)<1e-5f && e.dwGain==10000);
+    // A second constant effect: the strongest request wins, with its direction.
+    DICONSTANTFORCE second{9000}; LONG left=-1;
+    DIEFFECT e2=e; e2.rglDirection=&left; e2.lpvTypeSpecificParams=&second;
+    LPDIRECTINPUTEFFECT effect2=nullptr;
+    assert(SUCCEEDED(dev->CreateEffect(GUID_ConstantForce,&e2,&effect2,nullptr)) && effect2);
+    assert(g_ffb.effects.load()==2 && std::abs(g_ffb.constant.load()+.9f)<1e-5f);
+    // A gain-only update recomputes from the kept request (no stale magnitude): -0.9 at gain 0.5 is -0.45, so 0.75 wins.
+    DIEFFECT gainOnly{}; gainOnly.dwSize=sizeof gainOnly; gainOnly.dwGain=5000;
+    assert(SUCCEEDED(effect2->SetParameters(&gainOnly,DIEP_GAIN)) && std::abs(g_ffb.constant.load()-.75f)<1e-5f);
+    // A direction-only update flips the kept request: back to full gain and pointing right, 0.9 wins.
+    LONG right=1; DIEFFECT turn{}; turn.dwSize=sizeof turn; turn.cAxes=1; turn.rglDirection=&right;
+    gainOnly.dwGain=10000;
+    assert(SUCCEEDED(effect2->SetParameters(&gainOnly,DIEP_GAIN)) && SUCCEEDED(effect2->SetParameters(&turn,DIEP_DIRECTION)));
+    assert(std::abs(g_ffb.constant.load()-.9f)<1e-5f);
+    // SetParameters with DIEP_START is one write, not a start; an explicit Start is one start.
+    const uint32_t writes=g_ffb.mutedWrites.load(), startsBefore=g_ffb.mutedStarts.load();
+    constant.lMagnitude=-2000;
+    assert(SUCCEEDED(effect->SetParameters(&e,DIEP_TYPESPECIFICPARAMS|DIEP_START)) && g_ffb.mutedWrites.load()==writes+1 && g_ffb.mutedStarts.load()==startsBefore);
+    assert(SUCCEEDED(effect->Start(1,0)) && g_ffb.mutedStarts.load()==startsBefore+1);
+    // A periodic request has its own summary.
+    DIPERIODIC wave{}; wave.dwMagnitude=4000;
+    DIEFFECT e3=e; e3.cbTypeSpecificParams=sizeof wave; e3.lpvTypeSpecificParams=&wave;
+    LPDIRECTINPUTEFFECT effect3=nullptr;
+    assert(SUCCEEDED(dev->CreateEffect(GUID_Sine,&e3,&effect3,nullptr)) && std::abs(g_ffb.periodic.load()-.4f)<1e-5f);
+    // Released ends each identity: no slot keeps the pointer.
+    const void* ids[3]={effect,effect2,effect3};
+    effect->Release(); effect2->Release(); effect3->Release();
+    for (auto& t:g_effs) for (auto id:ids) assert(t.eff!=id);
+    // A fenced recording's Acquire writes no force property (the latch's Acquire guard is not installed).
+    recording=true;
+    assert(!latched() && SUCCEEDED(dev->Acquire()) && device.gains==0 && device.centreOff==0);
+    recording=false;
     DIPROPDWORD p{}; p.diph={sizeof p,sizeof p.diph,0,DIPH_DEVICE}; p.dwData=10000;
     dev->SetProperty(DIPROP_FFGAIN,&p.diph);
     p.dwData=DIPROPAUTOCENTER_ON; dev->SetProperty(DIPROP_AUTOCENTER,&p.diph);
@@ -158,7 +191,6 @@ int main() {
     dev->Escape(nullptr);
     dev->SendDeviceData(sizeof(DIDEVICEOBJECTDATA),nullptr,nullptr,0);
     assert(device.effects==0 && device.gains==0 && device.centreOn==0 && device.commands==0 && device.escapes==0 && device.sends==0);
-    assert(g_ffb.effects.load()==0);   // the proxy's own effect tap never sees a fenced effect
     p.dwData=DIPROPAUTOCENTER_OFF; dev->SetProperty(DIPROP_AUTOCENTER,&p.diph);
     assert(device.centreOff==1);       // less force is forwarded
 
@@ -188,5 +220,5 @@ int main() {
 
     dev->Release(); di->Release();
     RemoveDirectoryW((g_dir+L"\\dbce\\gravel").c_str()); RemoveDirectoryW((g_dir+L"\\dbce").c_str()); RemoveDirectoryW(g_dir.c_str());
-    std::cout<<"PASS fence over the proxy: switch rules (none, recording excludes, fence, inject, unpinned refused, COM refused), re-type through the wrapper, no effect/gain/autocentre-on/command/escape/data reaches the device, read tap once per read after injection, custom format untouched, unfenced tap unchanged\n";
+    std::cout<<"PASS fence over the proxy: switch rules (none, recording fences without injection, fence, inject, unpinned refused, COM refused), re-type through the wrapper, original force requests observed (strongest constant with direction, gain-only and direction-only updates recomputed, DIEP_START is a write, Start counted, periodic, Released clears), no effect/gain/autocentre-on/command/escape/data reaches the device, fenced recording Acquire writes no property, read tap once per read after injection, custom format untouched, unfenced tap unchanged\n";
 }
