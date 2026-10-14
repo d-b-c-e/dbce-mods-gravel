@@ -98,6 +98,30 @@ then reports availability, gaps and overflow. `complete-sampled-signals` means
 the file closed correctly. Its trajectory, force-replay and hardware-mute
 qualification fields remain false. It does not launch a game or drive a device.
 
+## Force mute for unattended runs: status (2026-10-14)
+
+Gravel is **not** cleared for unattended wheel runs: placement and other checks stay attended, or wait for a qualified
+mute (sana 90041). What exists and what is open:
+
+- **The latch.** Any `milestone_recording.request.ini` beside the DLL latches `recordingMuted()` for the whole process
+  (`src/recording.cpp`, `recordingInit`), including a malformed or expired request, which logs "invalid/expired
+  request; ... outputs muted" and captures nothing. While latched, the proxy guards the DirectInput surface: guarded
+  capture interfaces only; `SendForceFeedbackCommand` a no-op; `Escape`/`SendDeviceData` refused; force gain and
+  auto-centring written as 0; created and updated effects get zero-gain copies; `Start` a no-op; semantic enumeration
+  guarded; `ConfigureDevices` refused; `DllGetClassObject` guarded for `CLSID_DirectInput8`. The installed
+  `dinput8.dll` (`B35F4D0B`, milestone tools 0.2.0, 2026-10-10) contains the latch.
+- **Open: device-property restoration** after the latched session, and the **live acquisition path** (acquire,
+  unacquire and re-acquire on the real device). Fake tests cannot prove either; the capture inspector keeps reporting
+  `hardwareMuteQualified=false`.
+- **COM activation (supporting evidence only).** A read-only scan on 2026-10-14 found neither `CLSID_DirectInput8`
+  nor `CLSID_DirectInputDevice8` in `gravel-Win64-Shipping.exe` (`28032B88`), which imports `DirectInput8Create` from
+  `DINPUT8.dll`, nor in the other game-folder modules that import `CoCreateInstance` (TrueSky, FMOD). That makes a
+  registry activation of DirectInput unlikely, but it is **not proof** that no COM path exists: a GUID built at run
+  time, or a module loaded from outside the game folder (the Steam overlay, drivers), is not excluded.
+- **Not reused.** The toolkit's `DBCE_FFB_MUTE` is a contract (STD-035 item 8), not a native facility, and its
+  dinput8 fence (`native/dinput-proxy` `dbce_fence.hpp`/`dbce_test_switches.hpp`, as in GRID, DiRT and V-Rally 4)
+  is newer than this repo's `lib/toolkit` v0.8.0. Adopting it here would be adapter work, not done.
+
 ## Remaining route-playback work
 
 Find and verify the local player's physics callback, body pose/velocity and
