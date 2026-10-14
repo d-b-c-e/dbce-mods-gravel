@@ -2,3 +2,4 @@
 lib/toolkit/include/session_writer.h -text
 lib/toolkit/include/muted_effect.h -text
 lib/session/LICENSE -text
+src/vendor/display/*.hpp text eol=lf

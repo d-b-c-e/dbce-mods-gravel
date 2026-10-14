@@ -11,7 +11,10 @@ loading screens and the HUD sit on the centre screen; the side screens are black
 `milestone_mod.ini`):
 
 - **three separate monitors** side by side (the "Sim Racing" layout, STD-015): one borderless
-  window across them;
+  window across them. Since 2026-10-14 this is the toolkit's racing row (`src/vendor/display`):
+  the primary in the center with an equal display touching each side. A display above or below the
+  row, such as the rig's 1920x1080 dashboard, is ignored, and a primary that is not the center screen
+  does not span. `milestone_mod.log` names the row it found (`[triple] displays: ...`);
 - **Surround / Eyefinity** (one display at least 4:1): the game's window at the desktop size.
 
 On a single screen nothing is patched and the game runs stock. A plain Steam launch is enough

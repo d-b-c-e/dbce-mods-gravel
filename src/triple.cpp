@@ -36,6 +36,7 @@
 #include <cwchar>
 #include <cwctype>
 #include <vector>
+#include "vendor/display/dbce_windows_monitors.hpp"
 
 namespace {
 
@@ -484,34 +485,23 @@ bool patchImport(const char *dll, const char *name, void *replacement, void **or
 }
 
 // ------------------------------------------------------------- displays
-struct Layout { bool triple = false, separate = false; RECT span{}; int w = 0, h = 0; };
+struct Layout { bool triple = false, separate = false; RECT span{}; int w = 0, h = 0; std::string reason; };
 
-BOOL CALLBACK collectMonitor(HMONITOR m, HDC, LPRECT, LPARAM p)
-{
-    MONITORINFO mi{sizeof mi};
-    if (GetMonitorInfoW(m, &mi)) ((std::vector<RECT> *)p)->push_back(mi.rcMonitor);
-    return TRUE;
-}
-
-// Surround/Eyefinity: the primary display alone is at least 4:1 (three 16:9 panels are
-// 5.3:1; one 32:9 monitor is 3.6:1 and stays stock). Separate: three equal displays side
-// by side on one row (the owner's "Sim Racing" layout), spanned by one borderless window.
+// The toolkit's racing row (src/vendor/display, shared with every triple-screen mod). Surround/
+// Eyefinity: the primary display alone is at least 4:1 (three 16:9 panels are 5.3:1; one 32:9
+// monitor is 3.6:1 and stays stock), this mod's own rule, passed explicitly. Separate: the primary
+// in the centre with an equal display touching each side; a display above or below the row (the
+// rig's dashboard, 2026-10-13) is ignored. Spanned by one borderless window.
 Layout detectLayout()
 {
     Layout l;
     l.w = GetSystemMetrics(SM_CXSCREEN); l.h = GetSystemMetrics(SM_CYSCREEN);
-    if (l.h > 0 && l.w >= 4 * l.h) { l.triple = true; l.span = {0, 0, l.w, l.h}; return l; }
-    std::vector<RECT> mons;
-    EnumDisplayMonitors(nullptr, nullptr, collectMonitor, (LPARAM)&mons);
-    if (mons.size() != 3) return l;
-    std::sort(mons.begin(), mons.end(), [](const RECT &a, const RECT &b) { return a.left < b.left; });
-    const int w0 = mons[0].right - mons[0].left, h0 = mons[0].bottom - mons[0].top;
-    for (int i = 0; i < 3; ++i) {
-        if (mons[i].right - mons[i].left != w0 || mons[i].bottom - mons[i].top != h0 || mons[i].top != mons[0].top) return l;
-        if (i && mons[i].left != mons[i - 1].right) return l;
-    }
-    l.triple = l.separate = true;
-    l.span = {mons[0].left, mons[0].top, mons[2].right, mons[2].bottom};
+    const auto row = dbce::display::select_windows_racing_row(4.0);
+    l.reason = row.to_string() + " (" + row.reason + ")";
+    if (row.kind == dbce::display::RacingRowKind::None) return l;
+    l.triple = true;
+    l.separate = row.kind == dbce::display::RacingRowKind::Separate;
+    l.span = {row.x, row.y, row.x + row.width, row.y + row.height};
     return l;
 }
 
@@ -851,8 +841,9 @@ void tripleReport()
         logf("%s", g_early.substr(from, nl - from).c_str());
     g_early.clear();
     if (!g_active) {
-        logf("[triple] off (mode %s, layout %s)", g_tc.mode == Mode::Off ? "off" : g_tc.mode == Mode::On ? "on" : "auto",
-             g_layout.triple ? (g_layout.separate ? "separate triple" : "surround") : "single");
+        logf("[triple] off (mode %s, layout %s; displays %s)", g_tc.mode == Mode::Off ? "off" : g_tc.mode == Mode::On ? "on" : "auto",
+             g_layout.triple ? (g_layout.separate ? "separate triple" : "surround") : "single",
+             g_layout.reason.empty() ? "not checked" : g_layout.reason.c_str());
         return;
     }
     Frustum c = panelFor(1), r = panelFor(2);
@@ -860,6 +851,7 @@ void tripleReport()
          g_layout.separate ? "separate monitors, borderless span" : "surround",
          g_layout.span.right - g_layout.span.left, g_layout.span.bottom - g_layout.span.top,
          g_tc.centre, g_tc.right, g_tc.left, g_tc.fov == FovSource::Game ? "game" : "rig", g_tc.panelW, g_tc.panelH, g_tc.side, g_tc.bezel);
+    logf("[triple] displays: %s", g_layout.reason.c_str());
     logf("[triple] ui %s; menus %s", g_origArrange ? "on the centre screen" : "across the window (stock)", g_tc.menuSidesBlack ? "centre only (sides black outside gameplay)" : "three views");
     { const CameraOffsets c = cameraNow(); logf("[camera] numpad keys in a race; offsets forward %.2f right %.2f up %.2f m, tilt %.1f, fov %+.1f; steps %.3f m, %.1f, %.1f deg", c.x, c.y, c.z, c.tilt, c.fov, g_moveStep, g_tiltStep, g_fovStep); }
     logf("[triple] at fov 90: centre l%.3f r%.3f b%.3f t%.3f; right yaw %.1f l%.3f r%.3f", c.l, c.r, c.b, c.t, r.yaw, r.l, r.r);
