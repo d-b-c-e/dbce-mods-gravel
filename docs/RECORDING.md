@@ -134,7 +134,9 @@ and its injection are vendored byte-exact under `src/vendor` (`dinput-proxy/VEND
     re-type, the range tracking and the read tap.
   - No effect, force gain, force command, escape or device data reaches a device. Effects are software sinks.
     Auto-centring is forwarded only when the game turns it off.
-  - Unlike the recording latch, the fence writes no force property to the device, so it leaves nothing to restore.
+  - Unlike the recording latch, the fence never writes force gain, never downloads an effect and never forwards
+    auto-centring on. It does forward the game's own auto-centring off to the device (lola 108600), so a run keeps
+    the existing owner-state restoration duties.
   - COM creation (`DllGetClassObject`) is refused. Outside `gravel-Win64-Shipping.exe`, DirectInput is refused.
 - **`inject.on` as well.** `inject.txt` in the same folder carries `inject raw ...` and `inject action ...` lines.
   Action ids resolve through a `[Controls]` section in `milestone_mod.ini`, which a test runner writes for the run.
