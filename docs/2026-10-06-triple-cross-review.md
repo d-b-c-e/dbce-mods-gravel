@@ -146,3 +146,24 @@ remains off. Original reports/archives above remain historical evidence.
 All 20 toolkit rows are now represented. STD-001/003/004/009/016-018 remain
 unchecked; STD-012 pending; STD-005/006/013/015/019/020 partial. The two unresolved
 renderer edge cases are explicit in adoption rather than implied passed.
+
+## October 17 span-maintenance source correction
+
+Finding 4 remained present on canonical `7e3e282`: an existing `-ResX=` made
+`spanWindow` false, suppressing both argument insertion and the maintenance
+thread. The private successor separates those decisions. An enabled span on
+separate monitors keeps its maintenance thread regardless of existing resolution
+arguments. Existing arguments are retained byte for byte; missing resolution
+arguments still receive the existing windowed span defaults. Surround and
+`span_window=0` keep their previous thread eligibility.
+
+`tools/tests/Test-TripleSpan.ps1` extracts the actual production setup and thread
+admission blocks into an inert C++ fixture. Its 32 cases cover existing/missing
+resolution arguments, mixed case, span opt-out, separate/nonseparate layouts and
+positive/negative span origins. The fixture replaces thread creation with a
+counter; it loads no proxy and calls no window, device or display API.
+
+The successor is not built or tested yet. Focused fixture and affected proxy
+build require a fresh coordinator slot; rendered span maintenance remains a
+separate runtime gate. Existing qualified packages, owner install, launch
+options and prior evidence are preserved.

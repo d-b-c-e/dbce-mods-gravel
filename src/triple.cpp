@@ -810,8 +810,9 @@ void tripleAttach()
         }
     }
     if (!hasStereo) line += L" -emulatestereo";
-    bool spanWindow = g_layout.separate && g_tc.span && lower.find(L"-resx=") == std::wstring::npos;
-    if (spanWindow) {
+    // Existing resolution arguments only suppress insertion, not borderless span maintenance.
+    bool spanWindow = g_layout.separate && g_tc.span;
+    if (spanWindow && lower.find(L"-resx=") == std::wstring::npos) {
         wchar_t extra[96];
         swprintf(extra, 96, L" -windowed -ResX=%ld -ResY=%ld", g_layout.span.right - g_layout.span.left, g_layout.span.bottom - g_layout.span.top);
         line += extra;
