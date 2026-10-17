@@ -1,4 +1,4 @@
-param([switch]$NativeBindingsOnly, [switch]$HelpOnly)
+param([switch]$NativeBindingsOnly, [switch]$HelpOnly, [switch]$CameraStepsOnly)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Import-Module (Join-Path $repo 'tools\SetupUx.psm1') -Force
@@ -20,6 +20,80 @@ $oldPreviewMode = $env:MILESTONE_UX_PREVIEW
 $oldProbePid = $env:MILESTONE_UX_PROBE_PID
 $oldBrowserOut = $env:MILESTONE_UX_BROWSER_OUT
 try {
+    if ($CameraStepsOnly) {
+        # Only INI helpers and the actual draft editor, with fake console/process boundaries.
+        # No input-reader process, device, game, browser or visible console host is opened.
+        $original = [IO.File]::ReadAllText((Join-Path $repo 'games/gravel/milestone_mod.ini'))
+        $change = @{move_step_m='0.05';tilt_step_deg='3';fov_step_deg='4'}
+        $updated = Set-CameraSteps $original $change
+        $state = Get-CameraSteps $updated
+        Assert ($state.move_step_m -eq '0.05' -and $state.tilt_step_deg -eq '3' -and $state.fov_step_deg -eq '4') 'All camera steps must apply together.'
+        $restored = Set-CameraSteps $updated @{move_step_m='0.02';tilt_step_deg='1';fov_step_deg='2'}
+        Assert ($restored -ceq $original) 'Unrelated geometry, offsets, telemetry, comments and line endings changed.'
+        Assert ((Set-CameraSteps $original @{move_step_m='0.020';tilt_step_deg='1.0';fov_step_deg='2.00'}) -ceq $original) 'Numerically unchanged steps must keep exact text.'
+        foreach ($bad in '0','-1','NaN','Infinity','1.1','0,05',"0.05`nunsafe=1") {
+            Assert-Throws { Set-CameraSteps $original @{move_step_m=$bad;tilt_step_deg='1';fov_step_deg='2'} } 'Invalid move step accepted.'
+        }
+        Assert-Throws { Set-CameraSteps $original @{move_step_m='0.02';tilt_step_deg='46';fov_step_deg='2'} } 'Oversized tilt step accepted.'
+        Assert-Throws { Set-CameraSteps $original @{move_step_m='0.02';tilt_step_deg='1';fov_step_deg='0'} } 'Zero FOV step accepted.'
+        Assert-Throws { Set-CameraSteps $original @{move_step_m='0.02'} } 'Partial camera draft accepted.'
+        Assert-Throws { Set-CameraSteps $original @{move_step_m='0.02';tilt_step_deg='1';gain='2'} } 'Unrelated setting accepted.'
+        Assert-Throws { Get-CameraSteps ($original + "`r`n[camera]`r`nmove_step_m=0.1`r`n") } 'Duplicate camera sections accepted.'
+        Assert-Throws { Get-CameraSteps ($original.Replace('move_step_m=0.02',"move_step_m=0.02`r`nMOVE_STEP_M=0.1")) } 'Duplicate camera keys accepted.'
+        Assert-Throws { Get-CameraSteps '[proxy]' } 'Missing camera section accepted.'
+        $telemetryPath = Join-Path $fixture 'milestone_mod.ini'
+        $innerGameFolder = Join-Path $fixture 'game'
+        [IO.File]::WriteAllText($telemetryPath, $original)
+        $backup = Save-CameraSteps $telemetryPath $original $change
+        Assert ([IO.File]::ReadAllText($backup) -ceq $original) 'Camera backup did not preserve original text.'
+        Assert ([IO.File]::ReadAllText($telemetryPath) -ceq $updated) 'Camera transaction did not write the draft.'
+        Assert-Throws { Save-CameraSteps $telemetryPath $original $change } 'Stale camera draft overwrote later settings.'
+        Assert ($null -eq (Save-CameraSteps $telemetryPath $updated $change)) 'No-op camera Apply created a backup.'
+        # The existing telemetry entry uses the same atomic writer after extraction.
+        $off = Set-TelemetryFields $updated @{enabled='0'}
+        $telemetryBackup = Save-TelemetryConfig $telemetryPath $updated $off
+        Assert ([IO.File]::ReadAllText($telemetryBackup) -ceq $updated) 'Shared telemetry save lost its original backup.'
+        Assert ((Get-CameraSteps ([IO.File]::ReadAllText($telemetryPath))).move_step_m -eq '0.05') 'Telemetry save altered camera steps.'
+        foreach ($encoding in @((New-Object Text.UTF8Encoding($true)),(New-Object Text.UnicodeEncoding($false,$true)),(New-Object Text.UnicodeEncoding($true,$true)))) {
+            [IO.File]::WriteAllText($telemetryPath,$original,$encoding)
+            $before=[IO.File]::ReadAllBytes($telemetryPath)
+            $encodingBackup=Save-CameraSteps $telemetryPath $original $change
+            Assert ([Convert]::ToBase64String([IO.File]::ReadAllBytes($encodingBackup)) -ceq [Convert]::ToBase64String($before)) 'Encoded camera backup was not byte exact.'
+            Assert ([Convert]::ToBase64String([IO.File]::ReadAllBytes($telemetryPath)) -ceq [Convert]::ToBase64String($encoding.GetPreamble()+$encoding.GetBytes($updated))) 'Camera save changed the installed Unicode encoding/BOM.'
+        }
+
+        $tokens=$null; $parseErrors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $repo 'WheelSetup.ps1'),[ref]$tokens,[ref]$parseErrors)
+        Assert (!$parseErrors.Count) 'Setup script failed to parse.'
+        foreach ($name in 'Edit-CameraSteps','Assert-ModGameClosed') {
+            $definition=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true))
+            Assert ($definition.Count -eq 1) 'Production camera editor function was not unique.'
+            Invoke-Expression $definition[0].Extent.Text
+        }
+        function Say($m) {} function Head($m) {} function Ok($m) {} function Warn($m) { $script:cameraWarnings += [string]$m }
+        function Get-Process { param($EA) if ($script:cameraGameRunning) { [pscustomobject]@{Path=(Join-Path $innerGameFolder 'gravel.exe')} } }
+        function Read-Host { param($Prompt) if (!$script:cameraAnswers.Count) { throw 'Camera fixture answers exhausted.' }; $script:cameraAnswers.Dequeue() }
+        foreach ($case in @(
+            @{Answers=@('1','0.08','c');Running=$false;Applied=$false},
+            @{Answers=@('1','0.08','a');Running=$false;Applied=$true},
+            @{Answers=@('d','a');Running=$true;Applied=$false},
+            @{Answers=@('1','-1','a','c');Running=$false;Applied=$false}
+        )) {
+            [IO.File]::WriteAllText($telemetryPath,$original)
+            $script:cameraAnswers=New-Object 'Collections.Generic.Queue[string]'
+            foreach($answer in $case.Answers){$script:cameraAnswers.Enqueue($answer)}
+            if($case.Running){$script:cameraAnswers.Enqueue('c')}
+            $script:cameraGameRunning=$case.Running; $script:cameraWarnings=@()
+            Edit-CameraSteps
+            $actual=[IO.File]::ReadAllText($telemetryPath)
+            Assert (($actual -cne $original) -eq $case.Applied) 'Production Apply/Cancel/closed-game admission differed.'
+            if($case.Applied){Assert ((Get-CameraSteps $actual).move_step_m -eq '0.08') 'Production editor did not save its actual draft.'}
+            if($case.Running){Assert (($script:cameraWarnings -join ' ') -match 'Close the game') 'Running-game refusal was not shown.'}
+        }
+        Assert (@(Get-ChildItem -LiteralPath $fixture -Filter '*.tmp' -File).Count -eq 0) 'Temporary INI files remain.'
+        Write-Host "PASS: $checks camera step/settings checks. Synthetic INI and production editor with fake console/process boundaries only."
+        return
+    }
     if ($NativeBindingsOnly) {
         # Existing setup helpers, synthetic GVAS bytes and INI only. No reader,
         # device, game, installer or production save is invoked in this mode.

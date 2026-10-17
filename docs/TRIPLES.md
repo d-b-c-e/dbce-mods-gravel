@@ -74,6 +74,19 @@ three views together; reset returned to stock.
 
 ## Settings (`[triple]` in milestone_mod.ini)
 
+October 17 source adds **Cameras → Adjustment steps (Advanced)** in external
+Wheel settings. Edit the existing `[camera]` movement (meters), tilt and FOV
+(degrees) steps, or restore the default 0.02 m / 1 degree / 2 degrees to the
+draft. Apply saves all three together for the next launch; Cancel keeps the
+file unchanged. Movement must be positive and at most 1 m per press; angular
+steps must be positive and at most 45 degrees. Existing unedited text is kept.
+The editor refuses duplicate/missing camera sections or keys, invalid values,
+a running game and a stale file. It does not edit offsets or triple geometry.
+The existing atomic INI replacement/backup seam is shared with telemetry and
+preserves UTF-8/UTF-16 encoding and BOM. The `Test-SetupUx.ps1 -CameraStepsOnly`
+route covers disposable INI files and the actual editor with fake console and
+process boundaries; execution is pending. No live camera behavior follows.
+
 | key | default | |
 |---|---|---|
 | `mode` | `auto` | `auto`, `on`, `off` |

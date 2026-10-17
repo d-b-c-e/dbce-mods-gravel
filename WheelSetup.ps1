@@ -342,16 +342,55 @@ function Read-TelemetrySnapshot {
     [pscustomobject]@{ Text = $text; State = (Get-TelemetryState $text) }
 }
 
-function Write-TelemetryChange([string]$OriginalText, [string]$NewText) {
+function Assert-ModGameClosed([string]$Label) {
     $configFolder = (Split-Path $telemetryPath -Parent).TrimEnd('\') + '\'
     $selectedGameFolder = $innerGameFolder.TrimEnd('\') + '\'
     $running = Get-Process -EA SilentlyContinue | Where-Object {
         $_.Path -and ($_.Path.StartsWith($configFolder, [StringComparison]::OrdinalIgnoreCase) -or $_.Path.StartsWith($selectedGameFolder, [StringComparison]::OrdinalIgnoreCase))
     }
-    if ($running) { throw 'Close the game before saving telemetry. Settings are read at the next game launch.' }
+    if ($running) { throw "Close the game before saving $Label. Settings are read at the next game launch." }
+}
+
+function Write-TelemetryChange([string]$OriginalText, [string]$NewText) {
+    Assert-ModGameClosed 'telemetry'
     $backup = Save-TelemetryConfig $telemetryPath $OriginalText $NewText
     if ($backup) { Ok 'Saved for the next game launch. Runtime delivery is unverified.' }
     else { Say '  No connection values changed.' }
+}
+
+function Edit-CameraSteps {
+    try {
+        if (!(Test-Path -LiteralPath $telemetryPath -PathType Leaf)) { throw 'Mod settings are not installed. Run Install.bat, then reopen setup.' }
+        $original = [IO.File]::ReadAllText($telemetryPath)
+        $state = Get-CameraSteps $original
+    } catch { Warn $_.Exception.Message; return }
+    $draft = @{ move_step_m=$state.move_step_m; tilt_step_deg=$state.tilt_step_deg; fov_step_deg=$state.fov_step_deg }
+    while ($true) {
+        Head 'Wheel settings - Cameras - Adjustment steps'
+        Say '  Draft only. Saved steps apply at the next game launch, on triple layouts in a race.'
+        Say "  [1] Move: $($draft.move_step_m) m per press (positive, up to 1 m)"
+        Say "  [2] Tilt: $($draft.tilt_step_deg) degrees per press (positive, up to 45 degrees)"
+        Say "  [3] FOV:  $($draft.fov_step_deg) degrees per press (positive, up to 45 degrees)"
+        Say '  [D] Default steps  [A] Apply steps  [C] Cancel'
+        Say '  Camera offsets, triple geometry, wheel mappings and telemetry stay as saved.'
+        switch (Read-Host '  Choose') {
+            '1' { $value=Read-Host '  Move step in meters (decimal point; Enter keeps draft)'; if ($value) { $draft.move_step_m=$value.Trim() } }
+            '2' { $value=Read-Host '  Tilt step in degrees (decimal point; Enter keeps draft)'; if ($value) { $draft.tilt_step_deg=$value.Trim() } }
+            '3' { $value=Read-Host '  FOV step in degrees (decimal point; Enter keeps draft)'; if ($value) { $draft.fov_step_deg=$value.Trim() } }
+            'd' { $draft=@{move_step_m='0.02';tilt_step_deg='1';fov_step_deg='2'} }
+            'a' {
+                try {
+                    Assert-ModGameClosed 'camera steps'
+                    $backup=Save-CameraSteps $telemetryPath $original $draft
+                    if ($backup) { Ok 'Camera steps saved for the next game launch.'; Say "  Backup: $backup" }
+                    else { Say '  No camera step values changed.' }
+                    return
+                } catch { Warn "Camera steps were not applied. $($_.Exception.Message)" }
+            }
+            'c' { Say '  Canceled. Saved camera settings were kept.'; return }
+            default { Warn 'Apply or cancel the current edit to return.' }
+        }
+    }
 }
 
 function Edit-TelemetryConnection {
@@ -490,7 +529,16 @@ while ($true) {
         'Cameras' {
             Say "  Change camera: $(Assignment (Get-Field (Resolve-Slot 'Change camera')))"
             Say '  [B] Bind Change camera'
-            Say '  The game provides the camera cycle. This mod adds no Bonnet/Bumper mounts or adjustment shortcuts.'
+            Say '  The game provides the camera cycle. No added Bonnet/Bumper mounts.'
+            Say '  On a triple layout in a race: numpad 8/2 forward/back, 9/3 up/down, 4/6 left/right,'
+            Say '  7/1 tilt, +/- FOV, 5 reset. All three views move together.'
+            Say '  [A] Adjustment steps (Advanced; next game launch)'
+            if ($View -eq 'Advanced') {
+                try {
+                    $steps=Get-CameraSteps ([IO.File]::ReadAllText($telemetryPath))
+                    Say "  Saved steps: move $($steps.move_step_m) m; tilt $($steps.tilt_step_deg) degrees; FOV $($steps.fov_step_deg) degrees."
+                } catch { Warn $_.Exception.Message }
+            }
         }
         'Telemetry' {
             try {
@@ -546,6 +594,12 @@ while ($true) {
                 try {
                     if ($View -ne 'Advanced') { Save-SettingsView $PreferencesPath 'Advanced'; $View = 'Advanced' }
                     Edit-TelemetryConnection
+                } catch { Warn $_.Exception.Message }
+            }
+            elseif ($page -eq 'Cameras') {
+                try {
+                    if ($View -ne 'Advanced') { Save-SettingsView $PreferencesPath 'Advanced'; $View = 'Advanced' }
+                    Edit-CameraSteps
                 } catch { Warn $_.Exception.Message }
             }
         }

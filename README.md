@@ -59,7 +59,12 @@ mappings when leaving setup.
 
 **This is an external setup tool, not an F6 game panel.** The game still owns
 FFB, camera views, final endpoint/deadzone calibration and input combination.
-This mod adds no Bonnet/Bumper mounts or camera adjustment shortcuts. See the
+This mod adds no Bonnet/Bumper mounts. On triple layouts in a race, numpad keys
+adjust all three views together (see [Triple screens](docs/TRIPLES.md)).
+**Cameras → Adjustment steps (Advanced)** edits the existing movement, tilt and
+FOV step sizes as one draft with Apply or Cancel, for the next game launch.
+The game must be closed to apply. Camera offsets and triple geometry are kept.
+See the
 [UX adoption notes](docs/UX-OVERNIGHT-2026-09-16.md) for the exact scope and
 remaining shared-standard gaps.
 

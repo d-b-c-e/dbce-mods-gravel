@@ -383,18 +383,72 @@ function Set-TelemetryFields([string]$Text, [hashtable]$Changes) {
     return $Text
 }
 
-function Save-TelemetryConfig([string]$Path, [string]$Original, [string]$Text) {
+function Get-CameraSteps([string]$Text) {
+    $blocks = [regex]::Matches($Text, '(?ims)^[ \t]*\[camera\][ \t]*\r?\n.*?(?=^[ \t]*\[|\z)')
+    if ($blocks.Count -ne 1) { throw 'Camera settings need one [camera] section. Existing settings were kept.' }
+    $values = @{}
+    foreach ($key in 'move_step_m','tilt_step_deg','fov_step_deg') {
+        $fields = [regex]::Matches($blocks[0].Value, '(?im)^[ \t]*' + $key + '[ \t]*=([^\r\n]*)')
+        if ($fields.Count -ne 1) { throw "Camera settings need exactly one $key. Existing settings were kept." }
+        $values[$key] = $fields[0].Groups[1].Value.Trim()
+    }
+    return [pscustomobject]$values
+}
+
+function Set-CameraSteps([string]$Text, [hashtable]$Changes) {
+    $state = Get-CameraSteps $Text
+    $keys = @('move_step_m','tilt_step_deg','fov_step_deg')
+    if ($Changes.Count -ne 3 -or @($Changes.Keys | Where-Object { $_ -notin $keys }).Count) { throw 'Apply all three camera step sizes together.' }
+    $values = @{}
+    foreach ($key in $keys) {
+        $number = 0.0
+        $raw = [string]$Changes[$key]
+        $max = if ($key -eq 'move_step_m') { 1.0 } else { 45.0 }
+        if ($raw -match '[\r\n]' -or ![double]::TryParse($raw, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$number) -or
+            [double]::IsNaN($number) -or [double]::IsInfinity($number) -or $number -le 0 -or $number -gt $max) {
+            throw "Use a positive $key value no greater than $max, with a decimal point. No camera setting was changed."
+        }
+        $prior = 0.0
+        $same = [double]::TryParse([string]$state.$key, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$prior) -and $prior -eq $number
+        if (!$same) { $values[$key] = $number.ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
+    }
+    foreach ($key in $values.Keys) {
+        $block = [regex]::Match($Text, '(?ims)^[ \t]*\[camera\][ \t]*\r?\n.*?(?=^[ \t]*\[|\z)')
+        $field = [regex]::Match($block.Value, '(?im)^([ \t]*' + $key + '[ \t]*=)([^\r\n]*)')
+        $updated = $block.Value.Remove($field.Index, $field.Length).Insert($field.Index, $field.Groups[1].Value + $values[$key])
+        $Text = $Text.Remove($block.Index, $block.Length).Insert($block.Index, $updated)
+    }
+    return $Text
+}
+
+function Save-ModConfig([string]$Path, [string]$Original, [string]$Text, [string]$Label) {
     if ($Text -ceq $Original) { return $null }
-    if ([IO.File]::ReadAllText($Path) -cne $Original) { throw 'Another tool changed the telemetry settings. Cancel and reopen the editor before applying.' }
-    $temp = Join-Path (Split-Path $Path -Parent) ('.telemetry-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    if ([IO.File]::ReadAllText($Path) -cne $Original) { throw "Another tool changed the $Label settings. Cancel and reopen the editor before applying." }
+    # Keep the installed INI's Unicode encoding/BOM for both existing telemetry and camera edits.
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $encoding = New-Object Text.UTF8Encoding($false, $true)
+    $prefix = 0
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191) { $encoding = New-Object Text.UTF8Encoding($true, $true); $prefix=3 }
+    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 255 -and $bytes[1] -eq 254) { $encoding = New-Object Text.UnicodeEncoding($false, $true, $true); $prefix=2 }
+    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 254 -and $bytes[1] -eq 255) { $encoding = New-Object Text.UnicodeEncoding($true, $true, $true); $prefix=2 }
+    if ($encoding.GetString($bytes, $prefix, $bytes.Length-$prefix) -cne $Original) { throw 'The configuration changed or its encoding is unsupported. Reopen the editor before applying.' }
+    $temp = Join-Path (Split-Path $Path -Parent) ('.mod-settings-' + [guid]::NewGuid().ToString('N') + '.tmp')
     $backup = "$Path.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')-$([guid]::NewGuid().ToString('N').Substring(0,6))"
     try {
-        [IO.File]::WriteAllText($temp, $Text)
+        [IO.File]::WriteAllText($temp, $Text, $encoding)
         [IO.File]::Replace($temp, $Path, $backup)
     } catch {
-        throw [IO.IOException]::new('Could not save telemetry. Close the game or other editor, then retry. The previous settings were kept.', $_.Exception)
+        throw [IO.IOException]::new("Could not save $Label. Close the game or other editor, then retry. The previous settings were kept.", $_.Exception)
     } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp } }
     return $backup
+}
+
+function Save-TelemetryConfig([string]$Path, [string]$Original, [string]$Text) {
+    return Save-ModConfig $Path $Original $Text 'telemetry'
+}
+
+function Save-CameraSteps([string]$Path, [string]$Original, [hashtable]$Changes) {
+    return Save-ModConfig $Path $Original (Set-CameraSteps $Original $Changes) 'camera'
 }
 
 function Get-ModHelpLinks {
@@ -407,4 +461,4 @@ function Get-ModHelpLinks {
     }
 }
 
-Export-ModuleMember -Function Read-SavedWheelActions,Get-WheelButtonActions,Resolve-WheelActionSlot,Get-WheelAxisFields,Get-ButtonCaptureSource,Get-SettingsView,Save-SettingsView,Get-WheelBlock,Get-WheelField,Set-WheelField,Format-WheelAssignment,Get-AxisSamples,Get-DeviceInputPreview,Read-WheelInput,Find-AxisMapping,Save-WheelConfig,Get-ModSetting,Set-ModSetting,Get-TelemetryState,Assert-TelemetryConnection,Get-TelemetryReceiver,Get-TelemetryConnectionSummary,Set-TelemetryFields,Save-TelemetryConfig,Get-ModHelpLinks,Format-SupportRedactedText,Read-SupportLogTail,New-PreparedSupportReport,New-SupportBrowserSubmission,Save-SupportReviewFile
+Export-ModuleMember -Function Read-SavedWheelActions,Get-WheelButtonActions,Resolve-WheelActionSlot,Get-WheelAxisFields,Get-ButtonCaptureSource,Get-SettingsView,Save-SettingsView,Get-WheelBlock,Get-WheelField,Set-WheelField,Format-WheelAssignment,Get-AxisSamples,Get-DeviceInputPreview,Read-WheelInput,Find-AxisMapping,Save-WheelConfig,Get-ModSetting,Set-ModSetting,Get-TelemetryState,Assert-TelemetryConnection,Get-TelemetryReceiver,Get-TelemetryConnectionSummary,Set-TelemetryFields,Save-TelemetryConfig,Get-CameraSteps,Set-CameraSteps,Save-CameraSteps,Get-ModHelpLinks,Format-SupportRedactedText,Read-SupportLogTail,New-PreparedSupportReport,New-SupportBrowserSubmission,Save-SupportReviewFile
