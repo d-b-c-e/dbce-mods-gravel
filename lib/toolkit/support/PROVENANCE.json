@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "toolkitCommit": "838c227278d3b48ecdef3b6f89768ba4809a5345",
+  "toolkitCommit": "8e54a099c82147bceca7e33e6cd5ed1770cf1087",
   "files": [
     {
       "source": "shared/support/SupportReport.ps1",
@@ -10,7 +10,7 @@
     {
       "source": "shared/support/SupportReport.cs",
       "path": "SupportReport.cs",
-      "sha256": "D04F9626F3AB7689C61D9BF2AED6FFCED8233CB06EF08F995AC296385F3DF078"
+      "sha256": "134F12121DA709C31596501B4E47F17026E2B67309A025EB22AB7E4961D3B4FA"
     },
     {
       "source": "LICENSE",

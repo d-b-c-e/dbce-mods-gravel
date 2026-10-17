@@ -132,7 +132,7 @@ namespace Dbce.Wheel.Support
             text = Replace(text, @"(?i)[a-z]:[\\/]Users[\\/][^\\/\s""<>]+", "%USERPROFILE%");
             text = Replace(text, @"(?i)(?:gh[pousr]_[a-z0-9]{15,}|github_pat_[a-z0-9_]+)", "[redacted token]");
             // Accept ordinary key=value, quoted JSON keys and HTTP headers. Redact the rest of that line.
-            text = Replace(text, @"(?im)((?:authorization|password|passwd|access[_-]?token|api[_-]?key|secret)[""']?\s*[:=]\s*)[^\r\n]+", "$1[redacted]");
+            text = Replace(text, @"(?im)((?:authorization|password|passwd|token|api[_-]?key|secret)[""']?\s*[:=]\s*)[^\r\n]+", "$1[redacted]");
             text = Replace(text, @"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", "[redacted email]");
             return text;
         }
