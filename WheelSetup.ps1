@@ -517,7 +517,9 @@ while ($true) {
             Say '  The tool uses the terminal text size. Ctrl+C exits without saving pending mappings.'
             Say '  F6 is not available in this mod. Reopen WheelSetup.bat to change controls.'
             Say '  [I] Submit issue (review diagnostics before opening GitHub or saving .txt)'
-            Say "  $($links.ModLabel): $($links.ModUrl)  |  $($links.WheelkitLabel): $($links.WheelkitUrl)" 'DarkGray'
+            # One link per line so a 120-column console never wraps a URL.
+            Say "  $($links.ModLabel): $($links.ModUrl)" 'DarkGray'
+            Say "  $($links.WheelkitLabel): $($links.WheelkitUrl)" 'DarkGray'
             Say '  [M] Mod on GitHub  [W] Wheelkit on GitHub' 'DarkGray'
             if ($View -eq 'Advanced') { Say "  Device key: $($dev.Key) ($($dev.Type))"; Say "  Mapping file: $wc"; Say "  View preference: $PreferencesPath" }
         }
