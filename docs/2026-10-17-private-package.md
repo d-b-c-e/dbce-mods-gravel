@@ -34,3 +34,21 @@ The original observed receipt above separately records the actual DLL build.
 Camera-step source is `3650a60`, documented at `6eb480e`; existing39 focused
 checks passed in both PowerShell5.1 and7. Those passing checks are retained.
 No physical camera, display/scanout, driving or force acceptance is inferred.
+
+## Package result
+
+Packaging source `9db3bd573817d48b50dabf0117ee66997ec70175` produced private
+`milestone-wheel-tools-0.2.0-9db3bd57.zip`, SHA-256
+`CAF36D0822E6E6909692E663B6A9EE10C32B747B7B31667E149D68EEE1B13D72`.
+ZIP, original stage, extraction and logs/result remain in this worktree's
+`artifacts/private-package-20261017/run-01/` (ZIP under `package/`).
+
+All43 existing provenance checks passed, then the existing real packager emitted
+the candidate. Extraction passed the exact25-file manifest and retained-binary
+validation. All243 existing installer/package checks passed against those
+extracted bytes, using disposable targets only, including preservation of
+settings/bindings, dry-run refusal, rollback/removal and modified-file retention.
+No compiler, DLL/game, hardware, OS input/focus, owner state or exclusive rig
+slot was used. No child or cleanup remains. Original native span and camera
+checks were not repeated. This private package is ready for a separate bounded
+runtime handoff; the installed owner package remains unchanged.
