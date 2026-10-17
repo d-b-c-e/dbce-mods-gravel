@@ -153,15 +153,38 @@ function Resolve-WheelActionSlot([object[]]$Definition, [hashtable]$SavedActions
     return $null
 }
 
+function Get-WheelAxisFields([hashtable]$SavedActions) {
+    $fields = [ordered]@{ 'Steering'='Wheel_Steer'; 'Throttle'='Wheel_Accelerator';
+        'Brake'='Wheel_Brake'; 'Handbrake (axis)'='Wheel_Handbrake'; 'Clutch'='Wheel_Clutch' }
+    foreach ($pair in @(@('Steering','Steer'), @('Throttle','Throttle'), @('Brake','Brake'), @('Clutch','Clutch'))) {
+        $fields[$pair[0]] = Resolve-WheelActionSlot @($pair[1], $fields[$pair[0]]) $SavedActions -GravelDefaults
+    }
+    # The native handbrake axis is independent of the saved Handbrake button slot.
+    return $fields
+}
+
 function Format-WheelAssignment([string]$Value, [switch]$Advanced) {
     if ([string]::IsNullOrWhiteSpace($Value)) { return 'Not bound' }
     if ($Value -match '^Button(\d+)$') { $label = "Button $($Matches[1])" }
+    elseif ($Value -match '^([0-9a-fA-F]{8})_Button(\d+)$') { $label = "Button $($Matches[2]) (device $($Matches[1]))" }
     elseif ($Value -match '^Axis(\d+)(?:&(-?[0-9.]+)&(-?[0-9.]+))?$') {
         $label = "Axis $($Matches[1])"
         if ($Matches.ContainsKey(2) -and $Matches[2].StartsWith('-')) { $label += ' (inverted)' }
     } else { $label = 'Existing custom assignment' }
     if ($Advanced) { return "$label  [$Value]" }
     return $label
+}
+
+function Get-ButtonCaptureSource([string]$Assignment, [string]$WheelProduct, [object[]]$Devices) {
+    $product = $WheelProduct; $prefix = ''
+    if ($Assignment -match '^([0-9a-fA-F]{8})_Button(\d+)$') {
+        if ([int]$Matches[2] -lt 1 -or [int]$Matches[2] -gt 128) { throw 'The existing paired-device button is outside the supported range. The assignment was kept.' }
+        # Preserve an existing native pairing, never invent one for another device.
+        $product = $Matches[1].ToLowerInvariant(); $prefix = $Matches[1] + '_'
+    }
+    $connected = @($Devices | Where-Object { $_.Key -eq $product })
+    if ($connected.Count -ne 1) { throw "The binding's input device $product is missing or ambiguous. Reconnect that device; the assignment was kept." }
+    return [pscustomobject]@{ Product=$product; Prefix=$prefix; Name=$connected[0].Name }
 }
 
 function Get-AxisSamples([string[]]$Lines, [switch]$AllowOutOfRange) {
@@ -373,4 +396,4 @@ function Save-TelemetryConfig([string]$Path, [string]$Original, [string]$Text) {
     return $backup
 }
 
-Export-ModuleMember -Function Read-SavedWheelActions,Get-WheelButtonActions,Resolve-WheelActionSlot,Get-SettingsView,Save-SettingsView,Get-WheelBlock,Get-WheelField,Set-WheelField,Format-WheelAssignment,Get-AxisSamples,Get-DeviceInputPreview,Read-WheelInput,Find-AxisMapping,Save-WheelConfig,Get-ModSetting,Set-ModSetting,Get-TelemetryState,Assert-TelemetryConnection,Get-TelemetryReceiver,Get-TelemetryConnectionSummary,Set-TelemetryFields,Save-TelemetryConfig
+Export-ModuleMember -Function Read-SavedWheelActions,Get-WheelButtonActions,Resolve-WheelActionSlot,Get-WheelAxisFields,Get-ButtonCaptureSource,Get-SettingsView,Save-SettingsView,Get-WheelBlock,Get-WheelField,Set-WheelField,Format-WheelAssignment,Get-AxisSamples,Get-DeviceInputPreview,Read-WheelInput,Find-AxisMapping,Save-WheelConfig,Get-ModSetting,Set-ModSetting,Get-TelemetryState,Assert-TelemetryConnection,Get-TelemetryReceiver,Get-TelemetryConnectionSummary,Set-TelemetryFields,Save-TelemetryConfig

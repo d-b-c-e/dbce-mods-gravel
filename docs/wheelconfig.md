@@ -101,6 +101,21 @@ unchanged save bytes, clutch/custom-field preservation and CRLF. Original logs:
 No native reader, game or installer ran; actual gear/reverse/clutch consumption
 and a separate USB shifter remain runtime/adapter gaps.
 
+The affected continuation also preserves existing native paired-button mappings
+such as the shipped TS-XW profile's `b660044f_Button1` through7 and reverse8.
+Capture reads that existing product and retains its prefix rather than silently
+sampling the wheel and replacing it with an unqualified `ButtonN`. Missing or
+duplicate connected products refuse before capture. This supports editing an
+existing pairing, not creating arbitrary new DS8X routes. Assignment labels name
+the product, and conflict checks keep paired buttons distinct from wheel buttons.
+Steering, throttle, brake and clutch now follow their saved native destination;
+an ambiguous saved axis refuses instead of editing an unused default. The
+independent handbrake axis field is kept separate from its saved button action.
+The final affected fixture passed45 checks on each supported shell; logs at
+`artifacts/native-bindings-02/`, lease released `2026-10-17T00:32:17.1204211Z`.
+No hardware, game, production save or installer ran. Actual gear/reverse/clutch
+behavior and creating new separate-device pairings remain unqualified.
+
 ## Housekeeping
 
 - The file is **CRLF**. A `.*?$` regex eats the `\r` and converts every

@@ -76,6 +76,28 @@ try {
         Assert ((Resolve-WheelActionSlot @('GearUp','Wheel_RightShoulder') @{} -GravelDefaults) -ceq 'Wheel_RightShoulder') 'Existing verified Gravel defaults changed.'
         Assert (!(Resolve-WheelActionSlot @('GearUp','Wheel_RightShoulder') @{})) 'Other games must not inherit Gravel defaults.'
         Assert-Throws { Set-WheelField $original 'fixture' 'Wheel_Gear8' 'Button8' } 'An absent wheel field must never be created by native gear binding.'
+        $devices = @([pscustomobject]@{Key='0006346e';Name='Fixture wheel'}, [pscustomobject]@{Key='b660044f';Name='Fixture shifter'})
+        $paired = Get-ButtonCaptureSource 'b660044f_Button8' '0006346e' $devices
+        Assert ($paired.Product -ceq 'b660044f' -and $paired.Name -ceq 'Fixture shifter') 'An existing paired gear must sample its named device, not the wheel.'
+        $updated = Set-WheelField $original 'fixture' 'Wheel_GearReverse' ($paired.Prefix + 'Button7')
+        Assert ((Get-WheelField $updated 'fixture' 'Wheel_GearReverse') -ceq 'b660044f_Button7') 'Rebinding an existing paired shifter lost its native product prefix.'
+        $primary = Get-ButtonCaptureSource 'Button8' '0006346e' $devices
+        Assert ($primary.Product -ceq '0006346e' -and $primary.Prefix -ceq '') 'An ordinary wheel button must not gain a pairing.'
+        Assert ((Format-WheelAssignment 'b660044f_Button8') -ceq 'Button 8 (device b660044f)') 'The paired device must be visible in the assignment.'
+        Assert-Throws { Get-ButtonCaptureSource 'b660044f_Button8' '0006346e' @($devices[0]) } 'A missing paired device must not silently redirect capture to the wheel.'
+        Assert-Throws { Get-ButtonCaptureSource 'b660044f_Button8' '0006346e' @($devices[0],$devices[1],$devices[1]) } 'Duplicate paired products must not choose a device arbitrarily.'
+        Assert-Throws { Get-ButtonCaptureSource 'b660044f_Button129' '0006346e' $devices } 'An invalid native button range must not start capture.'
+        $axisSlots = Read-SavedWheelActions (BindingSave @(@('Clutch','Wheel_Generic_Axis1'), @('Brake','Wheel_Brake'), @('Handbrake','Wheel_RightTrigger')))
+        $axes = Get-WheelAxisFields $axisSlots
+        Assert ($axes.Clutch -ceq 'Wheel_Generic_Axis1') 'Clutch must use its saved action slot instead of an unused default field.'
+        Assert ($axes.'Handbrake (axis)' -ceq 'Wheel_Handbrake') 'The saved handbrake button must not replace the independent axis destination.'
+        $clutchText = $original + "Wheel_Generic_Axis1=`r`n"
+        $clutchUpdated = Set-WheelField $clutchText 'fixture' $axes.Clutch 'Axis8&-1.0&1.0'
+        Assert ((Get-WheelField $clutchUpdated 'fixture' 'Wheel_Generic_Axis1') -ceq 'Axis8&-1.0&1.0') 'Native clutch destination did not receive the staged axis.'
+        Assert ((Get-WheelField $clutchUpdated 'fixture' 'Wheel_Clutch') -ceq 'Axis7&1.0&0.0') 'An unused retained clutch field was changed.'
+        $ambiguousAxes = Get-WheelAxisFields @{Clutch=@('Wheel_Clutch','Wheel_Generic_Axis1')}
+        Assert (!$ambiguousAxes.Clutch) 'Ambiguous saved clutch slots must not fall back to a default.'
+        Assert ((Get-WheelAxisFields @{}).Clutch -ceq 'Wheel_Clutch') 'The verified native clutch fallback changed.'
         Write-Host "PASS: $checks native binding checks. Synthetic save/INI only; no hardware or game."
         return
     }

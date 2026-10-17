@@ -178,17 +178,11 @@ if (@($devs | Where-Object Key -eq $dev.Key).Count -gt 1) { Die 'Two connected d
 Ok $dev.Name
 
 # ------------------------------------------------------------------ helpers
-function Sample([int]$Seconds) {
-    Read-WheelInput -Probe $probe -Product $dev.Key -Seconds $Seconds
+function Sample([int]$Seconds, [string]$InputProduct = $dev.Key) {
+    Read-WheelInput -Probe $probe -Product $InputProduct -Seconds $Seconds
 }
 
-$AXES = [ordered]@{
-    'Steering' = 'Wheel_Steer'
-    'Throttle' = 'Wheel_Accelerator'
-    'Brake' = 'Wheel_Brake'
-    'Handbrake (axis)' = 'Wheel_Handbrake'
-    'Clutch' = 'Wheel_Clutch'
-}
+$AXES = Get-WheelAxisFields $actionSlot
 
 # ------------------------------------------------- WheelConfig read / write
 $raw = [IO.File]::ReadAllText($wc)
@@ -219,6 +213,10 @@ function Resolve-Slot($Name) {
 
 function Edit-Axis([string]$Name) {
     $field = $AXES[$Name]
+    if (-not $field -or -not [regex]::IsMatch((Get-WheelBlock $script:raw $dev.Key).Value,
+        '(?m)^' + [regex]::Escape($field) + '=')) {
+        Warn 'No unique saved axis mapping and existing wheel field. The previous assignment was kept.'; return
+    }
     Head "$Name - $(Assignment (Get-Field $field))"
     $choice = Read-Host '  [B] Bind  [C] Clear  [Enter] Cancel'
     if ($choice -eq 'c') {
@@ -263,16 +261,20 @@ function Edit-Button([string]$Name) {
             return
         }
         if ($choice -ne 'b') { return }
+        $source = Get-ButtonCaptureSource (Get-Field $slot) $dev.Key $devs
+        Say "  Input device: $($source.Name)"
         Say '  Release the button first, then press it during the next 6 seconds. Esc cancels.'
-        $captured = @(Sample 6 | Where-Object { $_ -match '^BTN \d+$' })
+        $captured = @(Sample 6 $source.Product | Where-Object { $_ -match '^BTN \d+$' })
         if (-not $captured.Count) { Warn 'No button pressed. The previous assignment was kept.'; return }
         $button = [int]($captured[0].Substring(4))
+        if ($button -lt 1 -or $button -gt 128) { Warn 'The input reader returned an unsupported button. The previous assignment was kept.'; return }
+        $value = $source.Prefix + "Button$button"
         $shared = @($FRIENDLY.Keys | Where-Object { $_ -ne $Name -and (Resolve-Slot $_) -eq $slot })
         if ($shared.Count) { Warn "The game shares this assignment with: $($shared -join ', ')." }
-        $other = @($FRIENDLY.Keys | Where-Object { $_ -ne $Name -and (Resolve-Slot $_) -and (Get-Field (Resolve-Slot $_)) -eq "Button$button" })
+        $other = @($FRIENDLY.Keys | Where-Object { $_ -ne $Name -and (Resolve-Slot $_) -and (Get-Field (Resolve-Slot $_)) -eq $value })
         if ($other.Count) { Warn "Button $button also triggers: $($other -join ', ')." }
         if ((Read-Host "  Button $button. [S] Save binding  [Enter] Cancel") -eq 's') {
-            Set-Field $slot "Button$button"
+            Set-Field $slot $value
             Ok "$Name ready to save"
         } else { Say '  Cancelled. The previous assignment was kept.' }
     } catch { Warn $_.Exception.Message }

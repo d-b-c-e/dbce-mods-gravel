@@ -41,8 +41,10 @@ previous assignment; the final Save mappings and exit writes the pending mapping
 **Controls → Driving and menu buttons** also offers Reverse, individual gears
 and Look back when Gravel's saved action layout names their wheel slots. It
 keeps missing or ambiguous native slots unchanged and never writes the save.
-Clutch remains an optional axis binding; select the gearbox/clutch mode in
-Gravel itself. Separate USB shifter routing is not qualified by this setup change.
+Clutch remains an optional axis binding and follows its saved native destination;
+select the gearbox/clutch mode in Gravel itself. Rebinding an existing paired
+shifter keeps its named device; a missing or ambiguous device refuses capture.
+Creating a new separate-device pairing and live input consumption remain unverified.
 Before saving, **Controls → Preview device input** lets you check the staged
 bindings for 10 seconds: Steering shows Left/Centre/Right and pedals/handbrake
 show Released through Full. **Esc** returns. This preview reads the device;
