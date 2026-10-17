@@ -195,7 +195,8 @@ function Invoke-PackageRemoval {
 
 function Get-SetupPackageFiles {
     @('WheelSetup.ps1','WheelSetup.bat','Uninstall.ps1','Uninstall.bat','tools\SetupUx.psm1',
-      'tools\InstallPackage.psm1','lib\toolkit\powershell\DbceWheel.psm1','dist\wheelprobe.exe','VERSION','QUICKSTART.md',
+      'tools\InstallPackage.psm1','lib\toolkit\support\SupportReport.ps1','lib\toolkit\support\SupportReport.cs',
+      'lib\toolkit\support\LICENSE','lib\toolkit\support\PROVENANCE.json','lib\toolkit\powershell\DbceWheel.psm1','dist\wheelprobe.exe','VERSION','QUICKSTART.md',
       'docs\troubleshooting.md','docs\forza-format.md')
 }
 

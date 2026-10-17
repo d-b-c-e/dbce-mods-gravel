@@ -5,3 +5,6 @@ lib/session/LICENSE -text
 src/vendor/display/*.hpp text eol=lf
 src/vendor/dinput-proxy/*.hpp text eol=lf
 src/vendor/controls/*.hpp text eol=lf
+
+# Shared support vendor bytes are provenance-pinned.
+lib/toolkit/support/* -text

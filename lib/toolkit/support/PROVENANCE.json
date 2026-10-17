@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "toolkitCommit": "838c227278d3b48ecdef3b6f89768ba4809a5345",
+  "files": [
+    {
+      "source": "shared/support/SupportReport.ps1",
+      "path": "SupportReport.ps1",
+      "sha256": "E8C71416436F06C4974F8599AAF3CB3E33AB7909029DC9DD4046B7C27BFC0330"
+    },
+    {
+      "source": "shared/support/SupportReport.cs",
+      "path": "SupportReport.cs",
+      "sha256": "D04F9626F3AB7689C61D9BF2AED6FFCED8233CB06EF08F995AC296385F3DF078"
+    },
+    {
+      "source": "LICENSE",
+      "path": "LICENSE",
+      "sha256": "B09FF3BF1807FA806BBDC69688697CEA82349686A596B3885D5B204354102404"
+    }
+  ],
+  "contract": "PowerShell adapter over exact canonical C# SupportReport; no report algorithm fork"
+}

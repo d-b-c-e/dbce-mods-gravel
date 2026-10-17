@@ -1,4 +1,4 @@
-param([switch]$NativeBindingsOnly)
+param([switch]$NativeBindingsOnly, [switch]$HelpOnly)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Import-Module (Join-Path $repo 'tools\SetupUx.psm1') -Force
@@ -103,6 +103,12 @@ try {
         return
     }
     $preference = Join-Path $fixture 'settings-view.json'
+    $text = "[/Wheel.Config/0006346e]`r`nProductName=Fixture wheel`r`nWheel_Steer=Axis1&1.0&0.0`r`nWheel_Accelerator=Axis3&1.0&0.0`r`nWheel_Brake=Axis6&1.0&0.0`r`nWheel_Handbrake=Axis7&1.0&0.0`r`nWheel_Clutch=`r`nWheel_RightTrigger=Button9`r`nWheel_Special_Left=Button8`r`nForceFeedback=0.0`r`nMaxRotationAngle=540.0`r`nCustomOwnerValue=42`r`n`r`n[/Wheel.Config/second]`r`nWheel_Handbrake=Axis2&1.0&0.0`r`n"
+    $wc = Join-Path $fixture 'Gravel\gravel\Config\WindowsNoEditor\WheelConfig.ini'
+    [IO.Directory]::CreateDirectory((Split-Path $wc -Parent)) | Out-Null
+    [IO.File]::WriteAllText($wc, $text)
+    if (!$HelpOnly) {
+    $preference = Join-Path $fixture 'settings-view.json'
     Assert ((Get-SettingsView $preference) -eq 'Simple') 'New users must start in Simple.'
     [IO.File]::WriteAllText($preference, '{}')
     Assert ((Get-SettingsView $preference) -eq 'Simple') 'An empty preference object must start in Simple.'
@@ -182,6 +188,8 @@ try {
     finally { $lock.Dispose() }
     Assert ([IO.File]::ReadAllText($wc) -ceq $text) 'A failed mapping save changed the old bindings.'
 
+    }
+
     # A tiny fixture executable emits recorded input text. It never loads DirectInput.
     $probeFolder = Join-Path $fixture 'dist'
     [IO.Directory]::CreateDirectory($probeFolder) | Out-Null
@@ -218,6 +226,13 @@ class FixtureProbe {
     Copy-Item (Join-Path $repo 'Uninstall.ps1') $fixture
     Copy-Item (Join-Path $repo 'tools\SetupUx.psm1') (Join-Path $fixture 'tools')
     Import-Module (Join-Path $repo 'tools\InstallPackage.psm1') -Force
+    $provenance = Get-Content (Join-Path $repo 'lib\toolkit\support\PROVENANCE.json') -Raw | ConvertFrom-Json
+    foreach ($entry in $provenance.files) {
+        $relative = 'lib\toolkit\support\' + $entry.path
+        Assert ((Get-FileHash (Join-Path $repo $relative)).Hash -ceq $entry.sha256) 'Vendored support bytes differ from their provenance.'
+        Assert ($relative -in @(Get-PackageFiles)) 'A vendored support dependency is absent from package delivery.'
+    }
+    Assert ('lib\toolkit\support\PROVENANCE.json' -in @(Get-PackageFiles)) 'Report provenance must travel with setup.'
     foreach ($relative in Get-PackageFiles) {
         if ($relative -in @('dist\wheelprobe.exe','lib\toolkit\powershell\DbceWheel.psm1')) { continue }
         $target = Join-Path $fixture $relative
@@ -243,6 +258,7 @@ class FixtureProbe {
         & (Join-Path $fixture 'WheelSetup.ps1') -GamePath (Split-Path $wc -Parent) -PreferencesPath $preference
         Assert ($global:MilestoneUxFixtureAnswers.Count -eq 0) 'Fixture interaction ended before all actions.'
     }
+    if (!$HelpOnly) {
     Run-Setup @('2','v','2','r','','v','1','3','4','5','6','x')
     Assert ([IO.File]::ReadAllText($wc) -ceq $text) 'View changes or navigation changed mappings.'
     Assert ((Get-SettingsView $preference) -eq 'Simple') 'Round trip did not retain explicit Simple.'
@@ -252,11 +268,14 @@ class FixtureProbe {
     Assert ((Get-WheelField ([IO.File]::ReadAllText($wc)) '0006346e' 'Wheel_Handbrake') -eq 'Axis3&-1.0&1.0') 'Accepted individual handbrake calibration was not saved.'
     Assert ((Get-WheelField ([IO.File]::ReadAllText($wc)) '0006346e' 'Wheel_RightTrigger') -eq 'Button9') 'Accepted handbrake axis removed its button.'
 
+    }
+
     $telemetryFolder = Join-Path $fixture 'Gravel\gravel\Binaries\Win64'
     [IO.Directory]::CreateDirectory($telemetryFolder) | Out-Null
     $telemetryFile = Join-Path $telemetryFolder 'milestone_mod.ini'
     $telemetryText = "[proxy]`r`nproduct=0006346e`r`n[telemetry]`r`nenabled=0`r`nhost=192.0.2.25`r`nport=9123`r`nformat=fm7`r`nrate=50`r`nowner_custom=keep this`r`n[ffb]`r`ngain=0.25`r`n"
     [IO.File]::WriteAllText($telemetryFile, $telemetryText)
+    if (!$HelpOnly) {
     [IO.File]::WriteAllText($preference, '{broken again')
     Run-Setup @('v','2','x')
     Assert ((Get-SettingsView $preference) -eq 'Advanced') 'Simple fallback did not recover to explicit Advanced.'
@@ -356,31 +375,46 @@ class FixtureProbe {
     Assert ([Convert]::ToBase64String([IO.File]::ReadAllBytes($telemetryFile)) -eq [Convert]::ToBase64String($telemetryBeforePreview)) 'Preview changed saved telemetry.'
     Assert ([Convert]::ToBase64String([IO.File]::ReadAllBytes($preference)) -eq [Convert]::ToBase64String($preferenceBeforePreview)) 'Preview changed presentation preference.'
 
+    } else {
+        $mappingBeforePreview = [IO.File]::ReadAllBytes($wc)
+        $telemetryBeforePreview = [IO.File]::ReadAllBytes($telemetryFile)
+    }
+
     $links = Get-ModHelpLinks
     Assert ($links.ModUrl -ceq 'https://github.com/d-b-c-e/dbce-mods-gravel' -and $links.WheelkitUrl -ceq 'https://github.com/d-b-c-e/dbce-wheelkit') 'Help links must name the mod and Wheelkit GitHub repositories.'
     $redacted = Format-SupportRedactedText "Path C:\Users\Alice\AppData\Local\Gravel mail alice@example.com token=secret123 ghp_1234567890abcdefghij1234567890"
-    Assert ($redacted -notmatch 'Alice|alice@example\.com|secret123|ghp_' -and $redacted -match '<redacted-user>' -and $redacted -match '<redacted-email>' -and $redacted -match '<redacted>') 'Redaction must strip user paths, emails and credentials.'
-    Assert (-not (Read-SupportLogTail '\\server\share\milestone_mod.log').Included) 'UNC log paths must be refused.'
+    Assert ($redacted -notmatch 'Alice|alice@example\.com|secret123|ghp_' -and $redacted.Contains('%USERPROFILE%') -and $redacted.Contains('[redacted email]') -and $redacted.Contains('[redacted]')) 'Redaction must strip user paths, emails and credentials.'
+    Assert-Throws { Read-SupportLogTail '\\server\share\milestone_mod.log' } 'UNC log paths must be refused.'
     $binaryLog = Join-Path $fixture 'binary.log'
     [IO.File]::WriteAllBytes($binaryLog, [byte[]]@(0x4D, 0x5A, 0x00, 0x01))
-    Assert (-not (Read-SupportLogTail $binaryLog).Included) 'Binary files must not be included as logs.'
+    Assert-Throws { Read-SupportLogTail $binaryLog } 'Binary files must not be included as logs.'
+    $invalidLog = Join-Path $fixture 'invalid-utf8.log'
+    [IO.File]::WriteAllBytes($invalidLog, [byte[]]@(0x61, 0xC3, 0x28))
+    Assert-Throws { New-PreparedSupportReport -ProductName 'Gravel' -ProductVersion '1' -Repository 'd-b-c-e/dbce-mods-gravel' -Title 'Invalid log' -Description 'Steps' -LogPaths @($invalidLog) } 'An invalid selected log must fail preparation rather than silently omit evidence.'
     $modLog = Join-Path $telemetryFolder 'milestone_mod.log'
     $longLogLines = (1..30 | ForEach-Object { "line $_ from C:\Users\OwnerName\Gravel token=abc$_" }) -join "`r`n"
     [IO.File]::WriteAllText($modLog, $longLogLines)
     $tail = Read-SupportLogTail $modLog 300
-    Assert ($tail.Included -and $tail.Truncated -and $tail.Content -notmatch 'OwnerName|abc' -and $tail.Content.StartsWith('line ')) 'Log tail must truncate cleanly on a line boundary and redact paths/secrets.'
-    $prepared = New-PreparedSupportReport -ProductName 'Gravel' -ProductVersion '0.1.0' -Repository 'd-b-c-e/dbce-mods-gravel' -EntryPoint 'WheelSetup.ps1' -Title 'Wheel setup test' -Description 'Pedal axis test for C:\Users\OwnerName\Gravel' -EnvironmentSummary @{ OS='Windows' } -SelectedSummary @{ Game='Gravel' } -LogPaths @($modLog) -MaxLogBytes 300
-    Assert ($prepared.RequireReview -and $prepared.Preview.Contains('## Included logs') -and $prepared.Preview -notmatch 'OwnerName') 'Prepared report must include redacted log preview and require review.'
+    Assert ($tail.Included -and $tail.Truncated -and $tail.Content -notmatch 'OwnerName|abc' -and $tail.Content.Contains('[Last 300 bytes only; partial first line omitted]')) 'Log tail must truncate cleanly on a line boundary and redact paths/secrets.'
+    [IO.File]::WriteAllText($modLog, 'Latest log from C:\Users\OwnerName\Gravel token=secret-value')
+    $prepared = New-PreparedSupportReport -ProductName 'Gravel' -ProductVersion '0.1.0' -Repository 'd-b-c-e/dbce-mods-gravel' -EntryPoint 'WheelSetup.ps1' -Title 'Wheel setup test' -Description 'Pedal axis test for C:\Users\OwnerName\Gravel' -EnvironmentSummary @{ OS='Windows' } -SelectedSummary @{ Game='Gravel' } -LogPaths @($modLog)
+    Assert ($prepared.Preview.Contains('## Selected mod logs (redacted)') -and $prepared.Preview -notmatch 'OwnerName') 'Prepared report must include redacted log preview and require review.'
+    $reviewedSnapshot = $prepared.Preview
+    [IO.File]::WriteAllText($modLog, 'Changed after review')
+    Assert ($prepared.Preview -ceq $reviewedSnapshot) 'Preparing a report must freeze its selected log snapshot.'
+    Assert-Throws { $prepared.Body = 'Changed body' } 'A prepared report must reject body mutation.'
     Assert-Throws { New-SupportBrowserSubmission $prepared } 'Browser draft URL must refuse unreviewed reports.'
     Assert-Throws { Save-SupportReviewFile $prepared (Join-Path $fixture 'unreviewed.txt') } 'Report file export must refuse unreviewed reports.'
     Assert-Throws { Save-SupportReviewFile $prepared (Join-Path $fixture 'report.md') -UserReviewed } 'Report file export must require a .txt extension.'
     $submission = New-SupportBrowserSubmission $prepared -UserReviewed
     Assert ($submission.Url.StartsWith('https://github.com/d-b-c-e/dbce-mods-gravel/issues/new?title=') -and $submission.BodyIncludedInUrl) 'Reviewed browser submission must target the Gravel repository.'
-    $compactSubmission = New-SupportBrowserSubmission $prepared -UserReviewed -MaxUriLength 512
-    Assert (-not $compactSubmission.BodyIncludedInUrl -and $compactSubmission.Url.Length -le 512) 'Long reports must fall back to a compact browser URL.'
+    $large = New-PreparedSupportReport -ProductName 'Other game' -ProductVersion '2' -Repository 'owner/another-game' -Title 'Long report' -Description ('Useful reproduction. ' + ('d' * 9000))
+    $compactSubmission = New-SupportBrowserSubmission $large -UserReviewed
+    Assert (-not $compactSubmission.BodyIncludedInUrl -and $compactSubmission.Url.Length -le 4096 -and $compactSubmission.IssueBody.Contains('Other game') -and $compactSubmission.IssueBody.Contains('Useful reproduction.')) 'Long reports must fall back to a compact browser URL.'
     $exportTxt = Join-Path $fixture 'reviewed-report.txt'
     Save-SupportReviewFile $prepared $exportTxt -UserReviewed
-    Assert ((Test-Path -LiteralPath $exportTxt) -and ([IO.File]::ReadAllText($exportTxt)).Contains('# Issue Title: Wheel setup test')) 'Reviewed report must be saved as UTF-8 text.'
+    Assert ((Test-Path -LiteralPath $exportTxt) -and ([IO.File]::ReadAllText($exportTxt)).Contains('# Wheel setup test')) 'Reviewed report must be saved as UTF-8 text.'
+    Assert ([IO.File]::ReadAllText($exportTxt) -ceq $reviewedSnapshot) 'Export must use the exact reviewed snapshot.'
     Assert-Throws { Save-SupportReviewFile $prepared $exportTxt -UserReviewed } 'Report export must never overwrite an existing file.'
 
     $browserCapture = Join-Path $fixture 'browser-urls.txt'
@@ -391,11 +425,13 @@ class FixtureProbe {
     Assert ($helpCancelOutput.Contains('[I] Submit issue') -and $helpCancelOutput.Contains('Canceled. No report was created.')) 'Help page must keep Submit issue separate and allow canceling.'
     Assert (-not (Test-Path -LiteralPath $browserCapture)) 'Viewing Help or canceling Submit issue must not open browser links.'
     Run-Setup @('6','m','w','i','Brake inversion question','Steps from C:\Users\TestDriver\Gravel','y','e',$interactiveExport,'i','Second draft','Needs browser draft','n','o','x')
-    Assert ((Test-Path -LiteralPath $interactiveExport) -and ([IO.File]::ReadAllText($interactiveExport)) -notmatch 'TestDriver' -and ([IO.File]::ReadAllText($interactiveExport)).Contains('### milestone_mod.log')) 'Interactive Submit issue export must include opted-in redacted log.'
+    Assert ((Test-Path -LiteralPath $interactiveExport) -and ([IO.File]::ReadAllText($interactiveExport)) -notmatch 'TestDriver' -and ([IO.File]::ReadAllText($interactiveExport)).Contains('--- milestone_mod.log ---')) 'Interactive Submit issue export must include opted-in redacted log.'
     $openedUrls = @([IO.File]::ReadAllLines($browserCapture) | Where-Object { $_ })
     Assert ($openedUrls.Count -eq 3 -and $openedUrls[0] -ceq 'https://github.com/d-b-c-e/dbce-mods-gravel' -and $openedUrls[1] -ceq 'https://github.com/d-b-c-e/dbce-wheelkit' -and $openedUrls[2].StartsWith('https://github.com/d-b-c-e/dbce-mods-gravel/issues/new?title=')) 'Help actions must open Mod, Wheelkit and reviewed issue draft URLs only when explicitly selected.'
     Assert ([Convert]::ToBase64String([IO.File]::ReadAllBytes($wc)) -eq [Convert]::ToBase64String($mappingBeforePreview)) 'Help and Submit issue flows must not change saved mappings.'
     Assert ([Convert]::ToBase64String([IO.File]::ReadAllBytes($telemetryFile)) -eq [Convert]::ToBase64String($telemetryBeforePreview)) 'Help and Submit issue flows must not change saved telemetry.'
+
+    if ($HelpOnly) { Write-Host "PASS: $checks affected Help/setup checks. Inert compiler/host only; no visible host, game, browser, network or hardware."; return }
 
     $game = Join-Path $fixture 'game-binaries'
     [IO.Directory]::CreateDirectory($game) | Out-Null

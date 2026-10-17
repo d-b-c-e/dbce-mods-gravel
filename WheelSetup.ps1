@@ -396,7 +396,7 @@ function Open-HelpDestination([string]$Url, [string]$Label) {
     } else {
         Start-Process $Url | Out-Null
     }
-    Ok "Opened $Label ($Url)"
+    Ok "Opened $Label"
 }
 
 function Invoke-SupportIssueFlow {
@@ -435,9 +435,19 @@ function Invoke-SupportIssueFlow {
         $report = New-PreparedSupportReport -ProductName 'Gravel' -ProductVersion $version -Repository 'd-b-c-e/dbce-mods-gravel' -EntryPoint 'WheelSetup.ps1' -Title $title -Description $description -EnvironmentSummary $envSummary -SelectedSummary $selectedSummary -LogPaths $selectedLogs
         Head 'Review prepared issue report'
         Say $report.Preview
+        Say '  Redaction is best effort; unusual secrets can remain. Check the complete preview.' 'DarkGray'
+        Say '  Opening a draft sends the prefilled text to GitHub; it does not create an issue.' 'DarkGray'
         $action = Read-Host '  [O] Open GitHub issue draft (reviewed)  [E] Export reviewed .txt report  [Enter] Cancel'
         if ($action -eq 'o') {
             $submission = New-SupportBrowserSubmission $report -UserReviewed
+            if ($submission.NeedsAttachment) {
+                Say '  This report needs one local support-report.txt attachment. Nothing is uploaded automatically.'
+                $reportFolder = Read-Host '  Existing folder for support-report.txt (Enter to cancel)'
+                if ([string]::IsNullOrWhiteSpace($reportFolder)) { Say '  Canceled. No draft was opened.'; return }
+                $reportPath = Join-Path $reportFolder 'support-report.txt'
+                Save-SupportReviewFile $report $reportPath -UserReviewed
+                Say "  Saved this reviewed snapshot: $reportPath"
+            }
             Open-HelpDestination $submission.Url 'GitHub issue draft'
             Say "  $($submission.Notice)"
         } elseif ($action -eq 'e') {
