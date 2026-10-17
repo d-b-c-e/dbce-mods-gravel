@@ -428,6 +428,12 @@ class FixtureProbe {
     Assert ((Test-Path -LiteralPath $interactiveExport) -and ([IO.File]::ReadAllText($interactiveExport)) -notmatch 'TestDriver' -and ([IO.File]::ReadAllText($interactiveExport)).Contains('--- milestone_mod.log ---')) 'Interactive Submit issue export must include opted-in redacted log.'
     $openedUrls = @([IO.File]::ReadAllLines($browserCapture) | Where-Object { $_ })
     Assert ($openedUrls.Count -eq 3 -and $openedUrls[0] -ceq 'https://github.com/d-b-c-e/dbce-mods-gravel' -and $openedUrls[1] -ceq 'https://github.com/d-b-c-e/dbce-wheelkit' -and $openedUrls[2].StartsWith('https://github.com/d-b-c-e/dbce-mods-gravel/issues/new?title=')) 'Help actions must open Mod, Wheelkit and reviewed issue draft URLs only when explicitly selected.'
+    $longDescription = 'Long reproduction details. ' + ('d' * 9000)
+    $longFlowOutput = Run-Setup @('6','i','Long browser draft',$longDescription,'n','o',$fixture,'x') 6>&1 | Out-String
+    $attachment = Join-Path $fixture 'support-report.txt'
+    Assert ((Test-Path -LiteralPath $attachment) -and ([IO.File]::ReadAllText($attachment)).Contains($longDescription)) 'Long interactive drafts must save the complete reviewed attachment before opening.'
+    $openedUrls = @([IO.File]::ReadAllLines($browserCapture) | Where-Object { $_ })
+    Assert ($openedUrls.Count -eq 4 -and $openedUrls[3].Length -le 4096 -and $longFlowOutput.Contains('Saved this reviewed snapshot:')) 'Long interactive drafts must open only the bounded summary after saving the attachment.'
     Assert ([Convert]::ToBase64String([IO.File]::ReadAllBytes($wc)) -eq [Convert]::ToBase64String($mappingBeforePreview)) 'Help and Submit issue flows must not change saved mappings.'
     Assert ([Convert]::ToBase64String([IO.File]::ReadAllBytes($telemetryFile)) -eq [Convert]::ToBase64String($telemetryBeforePreview)) 'Help and Submit issue flows must not change saved telemetry.'
 
