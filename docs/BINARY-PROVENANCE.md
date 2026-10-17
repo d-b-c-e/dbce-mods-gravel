@@ -1,5 +1,11 @@
 # Package and retained-binary provenance
 
+October17 private successor explicitly adopts the already qualified span-fix
+DLL, retaining the original wheelprobe. Exact build/receipt/result/hash/history
+anchors and the separate camera-step source evidence are in
+[the private package note](2026-10-17-private-package.md). The catalog remains
+strictly pinned; older artifact details below are preserved as history.
+
 2026-10-07 current **source-only review candidate**: `dist/dinput8.dll` is the
 clean `df3c771` build, committed at `640c394` and adopted into the retained catalog.
 SHA256 `B35F4D0B795C3CA916F98E76CC95925042FF56F2260A0F9A6C8556C3C08F54AA`,

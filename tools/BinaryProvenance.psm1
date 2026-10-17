@@ -15,11 +15,11 @@ function Read-RetainedBinaryProvenance([string]$Root) {
 
 function Assert-RetainedBinaryProvenance([string]$Root, [object]$Provenance) {
     $origin = '3545810f4fd33647ff19ab87ab02a9aec0afa47a'
-    $evidence = 'wheelprobe.exe: repository dist history and docs/DEPLOYMENT-2026-09-19.md; dinput8.dll: build.ps1 observed build of df3c771 (2026-10-07, local receipt); source-only recording candidate, no live qualification'
+    $evidence = 'wheelprobe.exe: retained September 19 artifact, docs/DEPLOYMENT-2026-09-19.md; dinput8.dll: observed clean 0a47a2d build, retained at d2558a6; docs/2026-10-17-private-package.md; no live qualification'
     # Reviewed public artifact identities, not inferred build/compiler attestation.
     $catalog = @{
-        # 2026-10-07: sampled recording source candidate df3c771; not live-qualified (docs/RECORDING.md).
-        'dist/dinput8.dll' = @('b35f4d0b795c3ca916f98e76cc95925042ff56f2260a0f9a6c8556c3c08f54aa','e1caab5bcc4976d87ef6408ffa8c748175a7ba15','640c3942c55199275f53ab5f61b5e10b72be706d')
+        # 2026-10-17: clean qualified span-fix build 0a47a2d; private retained adoption, no live qualification.
+        'dist/dinput8.dll' = @('90efcfa6cfa939003b058fe5b6f1f7e8f9417bf2b903c25ad9755441232f9ad6','4546c794a9512d48f01fe9787431ca497490c7cb','d2558a6eefa3357391245577fbb7b62371f94ca6')
         'dist/wheelprobe.exe' = @('4d9e94cc31f67f9644bfded1847b94810a9f24cbeba9cee01661ebb361c6883a','2e0de26f48a0b003103d4f05891cbabd259ac2e5',$origin)
     }
     $fields = @('SchemaVersion','Kind','HistoricalSourceEvidenceCommit','Evidence','BuildReceipt','Compiler','Toolchain','Reproducibility','Binaries')
