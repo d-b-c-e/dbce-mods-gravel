@@ -85,7 +85,14 @@ a running game and a stale file. It does not edit offsets or triple geometry.
 The existing atomic INI replacement/backup seam is shared with telemetry and
 preserves UTF-8/UTF-16 encoding and BOM. The `Test-SetupUx.ps1 -CameraStepsOnly`
 route covers disposable INI files and the actual editor with fake console and
-process boundaries; execution is pending. No live camera behavior follows.
+process boundaries. At source `3650a60`, all 39 checks passed independently in
+Windows PowerShell 5.1 and PowerShell 7, including Apply/Cancel, invalid values,
+running-game refusal, stale-file refusal, unrelated setting preservation,
+byte-exact backups and UTF-8/UTF-16 BOM preservation. Original logs remain in
+the private worktree's `artifacts/camera-steps-vunu-20261017/{ps51,pwsh}.log`.
+This route took about one second per shell and opened no compiler, input reader,
+device, visible host or game; no exclusive lease was taken (Kobe233910).
+No live camera or physical acceptance follows from these fixture results.
 
 | key | default | |
 |---|---|---|
