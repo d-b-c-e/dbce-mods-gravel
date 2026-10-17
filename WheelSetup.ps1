@@ -140,57 +140,7 @@ function Get-ActionSlots {
         $sav = if ($candidates.Count -eq 1) { $candidates[0] } else { $null }
     }
     if (-not $sav) { return @{} }
-    $b = [IO.File]::ReadAllBytes($sav.FullName)
-    if ($b.Length -lt 4 -or [Text.Encoding]::ASCII.GetString($b, 0, 4) -ne 'GVAS') { return @{} }
-
-    # Walk UE4 tagged properties: FString name, FString type, int64 size, u8 guid, payload
-    $map = @{}
-    $pos = 0
-    $needle = [Text.Encoding]::ASCII.GetBytes('ignitioninput')
-    for ($i = 0; $i -lt $b.Length - $needle.Length; $i++) {
-        $hit = $true
-        for ($j = 0; $j -lt $needle.Length; $j++) { if ($b[$i + $j] -ne $needle[$j]) { $hit = $false; break } }
-        if ($hit) { $pos = $i; break }
-    }
-    if (-not $pos) { return @{} }
-
-    function ReadStr([byte[]]$buf, [ref]$o) {
-        if ($o.Value + 4 -gt $buf.Length) { return $null }
-        $n = [BitConverter]::ToInt32($buf, $o.Value); $o.Value += 4
-        if ($n -eq 0) { return '' }
-        if ($n -gt 0 -and $n -lt 512 -and $o.Value + $n -le $buf.Length) {
-            $s = [Text.Encoding]::ASCII.GetString($buf, $o.Value, $n - 1); $o.Value += $n; return $s
-        }
-        if ($n -lt 0 -and $n -gt -512 -and $o.Value + (-$n * 2) -le $buf.Length) {
-            $n = -$n
-            $s = [Text.Encoding]::Unicode.GetString($buf, $o.Value, ($n - 1) * 2); $o.Value += $n * 2; return $s
-        }
-        return $null
-    }
-
-    $o = $pos
-    $action = $null
-    while ($o -lt $b.Length - 8) {
-        $save = $o
-        $name = ReadStr $b ([ref]$o)
-        if (-not $name -or $name -notmatch '^[\w]+$') { $o = $save + 1; continue }
-        if ($name -eq 'None') { continue }
-        $type = ReadStr $b ([ref]$o)
-        if (-not $type -or $type -notlike '*Property') { $o = $save + 1; continue }
-        if ($o + 9 -gt $b.Length) { break }
-        $size = [BitConverter]::ToInt64($b, $o); $o += 9        # int64 size + guid flag
-        if ($size -lt 0 -or $size -gt ($b.Length - $o)) { $o = $save + 1; continue }
-        if ($name -eq 'ActionName') { $p = $o; $action = ReadStr $b ([ref]$p) }
-        elseif ($name -eq 'KeyName' -and $action) {
-            $p = $o; $key = ReadStr $b ([ref]$p)
-            if ($key -and $key.StartsWith('Wheel_')) {
-                if (-not $map.ContainsKey($action)) { $map[$action] = $key }
-            }
-            $action = $null
-        }
-        $o += $size
-    }
-    $map
+    Read-SavedWheelActions ([IO.File]::ReadAllBytes($sav.FullName))
 }
 
 Head "Reading the game's action list"
@@ -201,18 +151,7 @@ $isGravel = $wc -match '(?i)[\\/]gravel[\\/]'
 
 # Gravel's defaults, verified by dumping settings.sav. Used when the save cannot
 # be read, and to give friendly names to the actions worth binding.
-$FRIENDLY = [ordered]@{
-    'Gear up'          = @('GearUp',         'Wheel_RightShoulder')
-    'Gear down'        = @('GearDown',       'Wheel_LeftShoulder')
-    'Handbrake (button)' = @('Handbrake',    'Wheel_RightTrigger')
-    'Rewind'           = @('RewindActivate', 'Wheel_LeftTrigger')
-    'Change camera'    = @('SwitchCamera',   'Wheel_Special_Left')
-    'Pause'            = @('Pause',          'Wheel_Special_Right')
-    'Confirm'          = @('Confirm',        'Wheel_FaceButton_Bottom')
-    'Back'             = @('Back',           'Wheel_FaceButton_Right')
-    'Respawn'          = @('Respawn',        'Wheel_FaceButton_Top')
-    'Photo mode'       = @('ReplayPhotoMode','Wheel_RightTrigger')
-}
+$FRIENDLY = Get-WheelButtonActions $actionSlot
 
 # --------------------------------------------------------------- the device
 Head "Choosing the device"
@@ -272,9 +211,9 @@ function Set-Field($Key, $Value) { $script:raw = Set-WheelField $script:raw $dev
 function Get-Field($Key) { Get-WheelField $script:raw $dev.Key $Key }
 function Assignment($Value) { Format-WheelAssignment $Value -Advanced:($View -eq 'Advanced') }
 function Resolve-Slot($Name) {
-    $action, $fallback = $FRIENDLY[$Name]
-    if ($actionSlot.ContainsKey($action)) { return $actionSlot[$action] }
-    if ($isGravel) { return $fallback }
+    $slot = Resolve-WheelActionSlot $FRIENDLY[$Name] $actionSlot -GravelDefaults:$isGravel
+    if ($slot -and [regex]::IsMatch((Get-WheelBlock $script:raw $dev.Key).Value,
+        '(?m)^' + [regex]::Escape($slot) + '=')) { return $slot }
     return $null
 }
 
@@ -315,7 +254,7 @@ function Edit-Axis([string]$Name) {
 
 function Edit-Button([string]$Name) {
     $slot = Resolve-Slot $Name
-    if (-not $slot) { Warn 'No verified action mapping. Start the game once, close it, then reopen setup with its settings save.'; return }
+    if (-not $slot) { Warn 'No unique saved action mapping and existing wheel field. Bind this action once in Gravel, close the game, then reopen setup. Mappings were kept.'; return }
     Head "$Name - $(Assignment (Get-Field $slot))"
     try {
         $choice = Read-Host '  [B] Bind  [C] Clear  [Enter] Cancel'

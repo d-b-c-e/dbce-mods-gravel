@@ -1,4 +1,4 @@
-param()
+param([switch]$NativeBindingsOnly)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Import-Module (Join-Path $repo 'tools\SetupUx.psm1') -Force
@@ -19,6 +19,66 @@ $oldFixture = $env:MILESTONE_UX_FIXTURE
 $oldPreviewMode = $env:MILESTONE_UX_PREVIEW
 $oldProbePid = $env:MILESTONE_UX_PROBE_PID
 try {
+    if ($NativeBindingsOnly) {
+        # Existing setup helpers, synthetic GVAS bytes and INI only. No reader,
+        # device, game, installer or production save is invoked in this mode.
+        function BindingSave($Records) {
+            $stream = New-Object IO.MemoryStream
+            $writer = New-Object IO.BinaryWriter($stream)
+            function WriteString([string]$Value) {
+                $bytes = [Text.Encoding]::ASCII.GetBytes($Value)
+                $writer.Write([int]($bytes.Length + 1)); $writer.Write($bytes); $writer.Write([byte]0)
+            }
+            try {
+                $writer.Write([Text.Encoding]::ASCII.GetBytes('GVAS')); $writer.Write((New-Object byte[] 16))
+                WriteString 'ignitioninput'; $writer.Write((New-Object byte[] 17))
+                foreach ($record in $Records) {
+                    foreach ($pair in @(@('ActionName', $record[0]), @('KeyName', $record[1]))) {
+                        WriteString $pair[0]; WriteString 'NameProperty'
+                        $writer.Write([long]($pair[1].Length + 5)); $writer.Write([byte]0); WriteString $pair[1]
+                    }
+                    WriteString 'None'
+                }
+                $writer.Flush(); return ,$stream.ToArray()
+            } finally { $writer.Dispose(); $stream.Dispose() }
+        }
+        $records = @(@('GearReverse','Wheel_GearReverse'), @('Gear1','Wheel_Gear1'), @('Gear2','Wheel_Gear2'),
+            @('Gear3','Wheel_Gear3'), @('Gear4','Wheel_Gear4'), @('Gear5','Wheel_Gear5'), @('Gear6','Wheel_Gear6'),
+            @('Gear7','Wheel_Gear7'), @('LookBackCamera','Wheel_FaceButton_Bottom'), @('Gear1','KeyboardOne'),
+            @('Gear1','Wheel_Gear1'))
+        $save = BindingSave $records
+        $saveBefore = [Convert]::ToBase64String($save)
+        $saved = Read-SavedWheelActions $save
+        Assert ($saved.Count -eq 9) 'The saved native actions were not read.'
+        Assert (@($saved.Gear1).Count -eq 1) 'Duplicate identical wheel slots must not create false ambiguity.'
+        Assert ([Convert]::ToBase64String($save) -ceq $saveBefore) 'Reading bindings changed save bytes.'
+        $actions = Get-WheelButtonActions $saved
+        Assert ($actions.Contains('Reverse') -and $actions.Contains('Gear 7') -and $actions.Contains('Look back')) 'Saved native actions are missing from standalone setup.'
+        Assert (!$actions.Contains('Gear 8')) 'A gear absent from the save must not be invented.'
+        Assert (@((Get-WheelButtonActions @{}).Keys).Count -eq 10) 'Missing saves must not invent H-pattern or look-back defaults.'
+        $text = "[/Wheel.Config/fixture]`r`nWheel_Clutch=Axis7&1.0&0.0`r`nOwnerCustom=keep`r`n"
+        foreach ($slot in @('Wheel_GearReverse','Wheel_Gear1','Wheel_Gear2','Wheel_Gear3','Wheel_Gear4','Wheel_Gear5','Wheel_Gear6','Wheel_Gear7','Wheel_FaceButton_Bottom')) { $text += "$slot=`r`n" }
+        $original = $text
+        $button = 1
+        foreach ($label in @('Reverse','Gear 1','Gear 2','Gear 3','Gear 4','Gear 5','Gear 6','Gear 7','Look back')) {
+            $slot = Resolve-WheelActionSlot $actions[$label] $saved -GravelDefaults
+            Assert ($slot -and $slot -like 'Wheel_*') "No native saved slot for $label."
+            $text = Set-WheelField $text 'fixture' $slot "Button$button"
+            Assert ((Get-WheelField $text 'fixture' $slot) -ceq "Button$button") "$label did not use the saved destination."
+            $button++
+        }
+        Assert ((Get-WheelField $text 'fixture' 'Wheel_Clutch') -ceq 'Axis7&1.0&0.0') 'New button bindings changed native clutch mapping.'
+        Assert ($text.Contains('OwnerCustom=keep') -and $text -notmatch '(?<!\r)\n') 'Native binding writes changed owner fields or CRLF.'
+        $ambiguous = Read-SavedWheelActions (BindingSave @(@('Gear1','Wheel_Gear1'), @('Gear1','Wheel_Gear2')))
+        Assert (!(Resolve-WheelActionSlot $actions['Gear 1'] $ambiguous -GravelDefaults)) 'Ambiguous gear slots must not select the first or guess a fallback.'
+        Assert (!(Resolve-WheelActionSlot @('GearUp','Wheel_RightShoulder') @{GearUp=@('Wheel_GearUp','Wheel_RightShoulder')} -GravelDefaults)) 'Ambiguous existing actions must not fall back to a default.'
+        Assert ((Read-SavedWheelActions ([byte[]]@(1,2,3))).Count -eq 0) 'A non-GVAS save must not create native mappings.'
+        Assert ((Resolve-WheelActionSlot @('GearUp','Wheel_RightShoulder') @{} -GravelDefaults) -ceq 'Wheel_RightShoulder') 'Existing verified Gravel defaults changed.'
+        Assert (!(Resolve-WheelActionSlot @('GearUp','Wheel_RightShoulder') @{})) 'Other games must not inherit Gravel defaults.'
+        Assert-Throws { Set-WheelField $original 'fixture' 'Wheel_Gear8' 'Button8' } 'An absent wheel field must never be created by native gear binding.'
+        Write-Host "PASS: $checks native binding checks. Synthetic save/INI only; no hardware or game."
+        return
+    }
     $preference = Join-Path $fixture 'settings-view.json'
     Assert ((Get-SettingsView $preference) -eq 'Simple') 'New users must start in Simple.'
     [IO.File]::WriteAllText($preference, '{}')

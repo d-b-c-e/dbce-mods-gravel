@@ -38,6 +38,11 @@ to repair it; the previous file is backed up and its location is shown.
 Button numbers start at 1. Each axis has its own binding flow, so an
 optional clutch or handbrake never holds up basic setup. Cancel keeps the
 previous assignment; the final Save mappings and exit writes the pending mappings.
+**Controls → Driving and menu buttons** also offers Reverse, individual gears
+and Look back when Gravel's saved action layout names their wheel slots. It
+keeps missing or ambiguous native slots unchanged and never writes the save.
+Clutch remains an optional axis binding; select the gearbox/clutch mode in
+Gravel itself. Separate USB shifter routing is not qualified by this setup change.
 Before saving, **Controls → Preview device input** lets you check the staged
 bindings for 10 seconds: Steering shows Left/Centre/Right and pedals/handbrake
 show Released through Full. **Esc** returns. This preview reads the device;

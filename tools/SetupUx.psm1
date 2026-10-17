@@ -64,6 +64,95 @@ function Set-WheelField([string]$Text, [string]$Product, [string]$Key, [string]$
     return $Text.Remove($block.Index, $block.Length).Insert($block.Index, $updated)
 }
 
+function Read-SavedWheelActions([byte[]]$b) {
+    if ($b.Length -gt 4 * 1024 * 1024) { throw "The settings save exceeds the read-only binding size limit." }
+    if ($b.Length -lt 4 -or [Text.Encoding]::ASCII.GetString($b, 0, 4) -ne 'GVAS') { return @{} }
+
+    # Walk UE4 tagged properties: FString name, FString type, int64 size, u8 guid, payload
+    $map = @{}
+    $pos = 0
+    $needle = [Text.Encoding]::ASCII.GetBytes('ignitioninput')
+    for ($i = 0; $i -lt $b.Length - $needle.Length; $i++) {
+        $hit = $true
+        for ($j = 0; $j -lt $needle.Length; $j++) { if ($b[$i + $j] -ne $needle[$j]) { $hit = $false; break } }
+        if ($hit) { $pos = $i; break }
+    }
+    if (-not $pos) { return @{} }
+
+    function ReadStr([byte[]]$buf, [ref]$o) {
+        if ($o.Value + 4 -gt $buf.Length) { return $null }
+        $n = [BitConverter]::ToInt32($buf, $o.Value); $o.Value += 4
+        if ($n -eq 0) { return '' }
+        if ($n -gt 0 -and $n -lt 512 -and $o.Value + $n -le $buf.Length) {
+            $s = [Text.Encoding]::ASCII.GetString($buf, $o.Value, $n - 1); $o.Value += $n; return $s
+        }
+        if ($n -lt 0 -and $n -gt -512 -and $o.Value + (-$n * 2) -le $buf.Length) {
+            $n = -$n
+            $s = [Text.Encoding]::Unicode.GetString($buf, $o.Value, ($n - 1) * 2); $o.Value += $n * 2; return $s
+        }
+        return $null
+    }
+
+    $o = $pos
+    $action = $null
+    while ($o -lt $b.Length - 8) {
+        $save = $o
+        $name = ReadStr $b ([ref]$o)
+        if (-not $name -or $name -notmatch '^[\w]+$') { $o = $save + 1; continue }
+        if ($name -eq 'None') { $action = $null; continue }
+        $type = ReadStr $b ([ref]$o)
+        if (-not $type -or $type -notlike '*Property') { $o = $save + 1; continue }
+        if ($o + 9 -gt $b.Length) { break }
+        $size = [BitConverter]::ToInt64($b, $o); $o += 9        # int64 size + guid flag
+        if ($size -lt 0 -or $size -gt ($b.Length - $o)) { $o = $save + 1; continue }
+        if ($name -eq 'ActionName') { $p = $o; $action = ReadStr $b ([ref]$p) }
+        elseif ($name -eq 'KeyName' -and $action) {
+            $p = $o; $key = ReadStr $b ([ref]$p)
+            if ($key -and $key.StartsWith('Wheel_')) {
+                if (-not $map.ContainsKey($action)) { $map[$action] = @() }
+                if ($map[$action] -cnotcontains $key) { $map[$action] += $key }
+            }
+            $action = $null
+        }
+        $o += $size
+    }
+    $map
+}
+
+function Get-WheelButtonActions([hashtable]$SavedActions) {
+    $actions = [ordered]@{
+    'Gear up'          = @('GearUp',         'Wheel_RightShoulder')
+    'Gear down'        = @('GearDown',       'Wheel_LeftShoulder')
+    'Handbrake (button)' = @('Handbrake',    'Wheel_RightTrigger')
+    'Rewind'           = @('RewindActivate', 'Wheel_LeftTrigger')
+    'Change camera'    = @('SwitchCamera',   'Wheel_Special_Left')
+    'Pause'            = @('Pause',          'Wheel_Special_Right')
+    'Confirm'          = @('Confirm',        'Wheel_FaceButton_Bottom')
+    'Back'             = @('Back',           'Wheel_FaceButton_Right')
+    'Respawn'          = @('Respawn',        'Wheel_FaceButton_Top')
+    'Photo mode'       = @('ReplayPhotoMode','Wheel_RightTrigger')
+}
+    # These actions have no guessed defaults: the game's own save must name them.
+    $savedOnly = [ordered]@{ 'Reverse'='GearReverse'; 'Gear 1'='Gear1'; 'Gear 2'='Gear2';
+        'Gear 3'='Gear3'; 'Gear 4'='Gear4'; 'Gear 5'='Gear5'; 'Gear 6'='Gear6';
+        'Gear 7'='Gear7'; 'Gear 8'='Gear8'; 'Look back'='LookBackCamera' }
+    foreach ($label in $savedOnly.Keys) {
+        if ($SavedActions.ContainsKey($savedOnly[$label])) { $actions[$label] = @($savedOnly[$label], $null) }
+    }
+    return $actions
+}
+
+function Resolve-WheelActionSlot([object[]]$Definition, [hashtable]$SavedActions, [switch]$GravelDefaults) {
+    $action, $fallback = $Definition
+    if ($SavedActions.ContainsKey($action)) {
+        $slots = @($SavedActions[$action] | Select-Object -Unique)
+        if ($slots.Count -eq 1) { return $slots[0] }
+        return $null # An ambiguous saved mapping must never fall back to a default.
+    }
+    if ($GravelDefaults) { return $fallback }
+    return $null
+}
+
 function Format-WheelAssignment([string]$Value, [switch]$Advanced) {
     if ([string]::IsNullOrWhiteSpace($Value)) { return 'Not bound' }
     if ($Value -match '^Button(\d+)$') { $label = "Button $($Matches[1])" }
@@ -284,4 +373,4 @@ function Save-TelemetryConfig([string]$Path, [string]$Original, [string]$Text) {
     return $backup
 }
 
-Export-ModuleMember -Function Get-SettingsView,Save-SettingsView,Get-WheelBlock,Get-WheelField,Set-WheelField,Format-WheelAssignment,Get-AxisSamples,Get-DeviceInputPreview,Read-WheelInput,Find-AxisMapping,Save-WheelConfig,Get-ModSetting,Set-ModSetting,Get-TelemetryState,Assert-TelemetryConnection,Get-TelemetryReceiver,Get-TelemetryConnectionSummary,Set-TelemetryFields,Save-TelemetryConfig
+Export-ModuleMember -Function Read-SavedWheelActions,Get-WheelButtonActions,Resolve-WheelActionSlot,Get-SettingsView,Save-SettingsView,Get-WheelBlock,Get-WheelField,Set-WheelField,Format-WheelAssignment,Get-AxisSamples,Get-DeviceInputPreview,Read-WheelInput,Find-AxisMapping,Save-WheelConfig,Get-ModSetting,Set-ModSetting,Get-TelemetryState,Assert-TelemetryConnection,Get-TelemetryReceiver,Get-TelemetryConnectionSummary,Set-TelemetryFields,Save-TelemetryConfig

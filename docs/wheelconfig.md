@@ -82,6 +82,25 @@ defaults hold some surprises:
 | `Confirm`        | `Wheel_FaceButton_Bottom` |                                      |
 | `Back`           | `Wheel_FaceButton_Right` |                                       |
 
+### Standalone native gear bindings
+
+The external setup's existing button-binding flow now exposes `GearReverse`,
+`Gear1` through `Gear8` and `LookBackCamera` only when the read-only saved
+layout names them. It writes the existing destination in the selected wheel's
+INI section; a missing field or multiple distinct saved destinations refuses
+the edit. Duplicate records naming the same destination are harmless. No new
+save action, neutral gear, transmission option or native capability is invented.
+The clutch axis and saved game-native gearbox options remain independent.
+
+The parser and action resolver live in the existing `tools/SetupUx.psm1` and
+are reused by `WheelSetup.ps1`. The existing UX fixture's `-NativeBindingsOnly`
+mode passed32 synthetic save/INI checks on Windows PowerShell5.1 and PowerShell7,
+including reverse/gears/look-back destinations, ambiguity, no guessed defaults,
+unchanged save bytes, clutch/custom-field preservation and CRLF. Original logs:
+`artifacts/native-bindings-01/` in `livo-gravel-native-bindings-20261016`.
+No native reader, game or installer ran; actual gear/reverse/clutch consumption
+and a separate USB shifter remain runtime/adapter gaps.
+
 ## Housekeeping
 
 - The file is **CRLF**. A `.*?$` regex eats the `\r` and converts every
