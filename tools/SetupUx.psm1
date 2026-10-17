@@ -213,7 +213,7 @@ function Get-DeviceInputPreview([string]$Mapping, [int[]]$Values, [switch]$Steer
     if ($Steering) {
         $value = $normalized * 2.0 - 1.0
         $percent = [Math]::Round([Math]::Abs($value) * 100)
-        $label = if ($percent -eq 0) { 'Centre' } elseif ($value -lt 0) { "Left $percent%" } else { "Right $percent%" }
+        $label = if ($percent -eq 0) { 'Center' } elseif ($value -lt 0) { "Left $percent%" } else { "Right $percent%" }
     } else {
         $value = $normalized
         $percent = [Math]::Round($value * 100)
@@ -242,7 +242,7 @@ function Read-WheelInput([string]$Probe, [string]$Product, [ValidateRange(1,30)]
             $cancel = $false
             if ($CancellationRequested) { $cancel = [bool](& $CancellationRequested) }
             else { try { if ([Console]::KeyAvailable) { $cancel = [Console]::ReadKey($true).Key -eq 'Escape' } } catch { } }
-            if ($cancel) { throw [OperationCanceledException]::new('Cancelled. No assignment was changed.') }
+            if ($cancel) { throw [OperationCanceledException]::new('Canceled. No assignment was changed.') }
             if ($timer.Elapsed.TotalSeconds -gt ($Seconds + 1)) { throw [TimeoutException]::new('The input reader timed out. Reconnect the device and try again.') }
             # wheelprobe sends an AX heartbeat every second even without movement.
             if ($timer.Elapsed.TotalSeconds - $lastSample -gt 2.5) { throw [IO.IOException]::new('Device samples stopped. Check the connection and retry.') }
@@ -396,4 +396,265 @@ function Save-TelemetryConfig([string]$Path, [string]$Original, [string]$Text) {
     return $backup
 }
 
-Export-ModuleMember -Function Read-SavedWheelActions,Get-WheelButtonActions,Resolve-WheelActionSlot,Get-WheelAxisFields,Get-ButtonCaptureSource,Get-SettingsView,Save-SettingsView,Get-WheelBlock,Get-WheelField,Set-WheelField,Format-WheelAssignment,Get-AxisSamples,Get-DeviceInputPreview,Read-WheelInput,Find-AxisMapping,Save-WheelConfig,Get-ModSetting,Set-ModSetting,Get-TelemetryState,Assert-TelemetryConnection,Get-TelemetryReceiver,Get-TelemetryConnectionSummary,Set-TelemetryFields,Save-TelemetryConfig
+function Get-ModHelpLinks {
+    [pscustomobject]@{
+        ModLabel      = 'Mod on GitHub'
+        ModUrl        = 'https://github.com/d-b-c-e/dbce-mods-gravel'
+        WheelkitLabel = 'Wheelkit on GitHub'
+        WheelkitUrl   = 'https://github.com/d-b-c-e/dbce-wheelkit'
+        Repository    = 'd-b-c-e/dbce-mods-gravel'
+    }
+}
+
+function Format-SupportRedactedText([AllowEmptyString()][string]$Value, [switch]$SingleLine) {
+    if ([string]::IsNullOrEmpty($Value)) { return '' }
+    $text = $Value.Replace("`r`n", "`n").Replace("`r", "`n")
+    foreach ($pair in @(
+        @($env:USERPROFILE, '%USERPROFILE%'),
+        @($env:LOCALAPPDATA, '%LOCALAPPDATA%'),
+        @($env:APPDATA, '%APPDATA%')
+    )) {
+        $rawRoot = $pair[0]
+        if (-not [string]::IsNullOrWhiteSpace($rawRoot)) {
+            $trimmed = $rawRoot.TrimEnd('\', '/')
+            if ($trimmed.Length -ge 3) {
+                $text = [regex]::Replace($text, [regex]::Escape($trimmed), $pair[1], [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            }
+        }
+    }
+    $text = [regex]::Replace($text, '(?i)([A-Za-z]:\\Users\\)([^\\\r\n"/]+)', '$1<redacted-user>')
+    $text = [regex]::Replace($text, '(?i)(/Users/|/home/)([^/\r\n"]+)', '$1<redacted-user>')
+    $text = [regex]::Replace($text, '(?i)([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})', '<redacted-email>')
+    $text = [regex]::Replace($text, '\b(gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b', '<redacted-token>')
+    $text = [regex]::Replace($text, '(?im)\b(password|passwd|secret|token|api[_-]?key|authorization)\b(\s*[:=]\s*)([^\r\n]+)', '$1$2<redacted>')
+    $builder = New-Object Text.StringBuilder $text.Length
+    foreach ($ch in $text.ToCharArray()) {
+        if ($ch -eq "`n" -and -not $SingleLine) { [void]$builder.Append("`n") }
+        elseif ($ch -eq "`t" -and -not $SingleLine) { [void]$builder.Append('    ') }
+        elseif ([int][char]$ch -lt 0x20 -or [int][char]$ch -eq 0x7f) { [void]$builder.Append(' ') }
+        else { [void]$builder.Append($ch) }
+    }
+    $cleaned = $builder.ToString()
+    if ($SingleLine) { return ([regex]::Replace($cleaned, '\s+', ' ')).Trim() }
+    return $cleaned.TrimEnd()
+}
+
+function Read-SupportLogTail([string]$Path, [int]$MaxBytes = 24000) {
+    if ($MaxBytes -lt 256 -or $MaxBytes -gt 262144) { throw 'MaxBytes must be between 256 and 262144.' }
+    $safeName = if ([string]::IsNullOrWhiteSpace($Path)) { 'missing-log.txt' } else { [IO.Path]::GetFileName($Path.Trim()) }
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return [pscustomobject]@{ Included=$false; FileName=$safeName; Content=''; Truncated=$false; OriginalBytes=0L; IncludedBytes=0; Status='Log path was empty.' }
+    }
+    if ($Path.StartsWith('\\') -or $Path.StartsWith('//')) {
+        return [pscustomobject]@{ Included=$false; FileName=$safeName; Content=''; Truncated=$false; OriginalBytes=0L; IncludedBytes=0; Status='Network paths are not read by the report tool.' }
+    }
+    try {
+        $fullPath = [IO.Path]::GetFullPath($Path)
+        $info = New-Object IO.FileInfo $fullPath
+        if (-not $info.Exists) {
+            return [pscustomobject]@{ Included=$false; FileName=$info.Name; Content=''; Truncated=$false; OriginalBytes=0L; IncludedBytes=0; Status='Log file was not found.' }
+        }
+        if (($info.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            return [pscustomobject]@{ Included=$false; FileName=$info.Name; Content=''; Truncated=$false; OriginalBytes=0L; IncludedBytes=0; Status='Symbolic links and reparse points are not read by the report tool.' }
+        }
+        $stream = New-Object IO.FileStream($fullPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        try {
+            $length = $stream.Length
+            $headCount = [int][Math]::Min(4L, $length)
+            $head = New-Object byte[] $headCount
+            [void]$stream.Read($head, 0, $headCount)
+            $encodingMode = 'utf8'
+            $bomLength = 0
+            if ($headCount -ge 3 -and $head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF) { $bomLength = 3 }
+            elseif ($headCount -ge 2 -and $head[0] -eq 0xFF -and $head[1] -eq 0xFE) { $encodingMode = 'utf16le'; $bomLength = 2 }
+            elseif ($headCount -ge 2 -and $head[0] -eq 0xFE -and $head[1] -eq 0xFF) { $encodingMode = 'utf16be'; $bomLength = 2 }
+            $truncated = $length -gt $MaxBytes
+            $startOffset = if ($truncated) { $length - $MaxBytes } else { [long]$bomLength }
+            if ($startOffset -lt $bomLength) { $startOffset = [long]$bomLength }
+            if ($encodingMode -ne 'utf8' -and (($startOffset - $bomLength) % 2 -ne 0)) { $startOffset++ }
+            [void]$stream.Seek($startOffset, [IO.SeekOrigin]::Begin)
+            $toRead = [int][Math]::Max(0L, $length - $startOffset)
+            $bytes = New-Object byte[] $toRead
+            $offset = 0
+            while ($offset -lt $toRead) {
+                $read = $stream.Read($bytes, $offset, $toRead - $offset)
+                if ($read -le 0) { break }
+                $offset += $read
+            }
+            if ($offset -lt $toRead) {
+                $trimmedBytes = New-Object byte[] $offset
+                [Array]::Copy($bytes, $trimmedBytes, $offset)
+                $bytes = $trimmedBytes
+            }
+            if ($encodingMode -eq 'utf8') {
+                $controls = 0
+                foreach ($b in $bytes) {
+                    if ($b -eq 0) {
+                        return [pscustomobject]@{ Included=$false; FileName=$info.Name; Content=''; Truncated=$false; OriginalBytes=$length; IncludedBytes=0; Status='Binary files are not included in issue reports.' }
+                    }
+                    if ($b -lt 0x20 -and $b -ne 0x09 -and $b -ne 0x0A -and $b -ne 0x0D) { $controls++ }
+                }
+                if ($bytes.Length -gt 0 -and ($controls * 50 -gt $bytes.Length)) {
+                    return [pscustomobject]@{ Included=$false; FileName=$info.Name; Content=''; Truncated=$false; OriginalBytes=$length; IncludedBytes=0; Status='Binary files are not included in issue reports.' }
+                }
+                $text = [Text.UTF8Encoding]::new($false, $false).GetString($bytes)
+            } else {
+                if ($bytes.Length % 2 -ne 0) {
+                    $even = New-Object byte[] ($bytes.Length - 1)
+                    [Array]::Copy($bytes, $even, $even.Length)
+                    $bytes = $even
+                }
+                $enc = if ($encodingMode -eq 'utf16le') { [Text.UnicodeEncoding]::new($false, $false, $true) } else { [Text.UnicodeEncoding]::new($true, $false, $true) }
+                $text = $enc.GetString($bytes)
+                $controls = 0
+                foreach ($ch in $text.ToCharArray()) {
+                    $code = [int][char]$ch
+                    if ($code -eq 0) {
+                        return [pscustomobject]@{ Included=$false; FileName=$info.Name; Content=''; Truncated=$false; OriginalBytes=$length; IncludedBytes=0; Status='Binary files are not included in issue reports.' }
+                    }
+                    if ($code -lt 0x20 -and $ch -ne "`t" -and $ch -ne "`n" -and $ch -ne "`r") { $controls++ }
+                }
+                if ($text.Length -gt 0 -and ($controls * 50 -gt $text.Length)) {
+                    return [pscustomobject]@{ Included=$false; FileName=$info.Name; Content=''; Truncated=$false; OriginalBytes=$length; IncludedBytes=0; Status='Binary files are not included in issue reports.' }
+                }
+            }
+            $text = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+            if ($truncated) {
+                $firstNewline = $text.IndexOf("`n")
+                if ($firstNewline -ge 0 -and ($firstNewline + 1) -lt $text.Length) {
+                    $text = $text.Substring($firstNewline + 1)
+                }
+            }
+            $text = Format-SupportRedactedText $text
+            $status = if ($truncated) { "Included last $($bytes.Length) of $length bytes." } else { "Included $($bytes.Length) bytes." }
+            return [pscustomobject]@{ Included=$true; FileName=$info.Name; Content=$text; Truncated=$truncated; OriginalBytes=$length; IncludedBytes=$bytes.Length; Status=$status }
+        } finally { $stream.Dispose() }
+    } catch {
+        return [pscustomobject]@{ Included=$false; FileName=$safeName; Content=''; Truncated=$false; OriginalBytes=0L; IncludedBytes=0; Status=('Log could not be read: ' + (Format-SupportRedactedText $_.Exception.Message -SingleLine)) }
+    }
+}
+
+function New-PreparedSupportReport(
+    [string]$ProductName = 'Gravel',
+    [string]$ProductVersion = 'unknown',
+    [string]$Repository = 'd-b-c-e/dbce-mods-gravel',
+    [string]$EntryPoint = 'WheelSetup.ps1',
+    [string]$Title,
+    [string]$Description,
+    $EnvironmentSummary,
+    $SelectedSummary,
+    [string[]]$LogPaths = @(),
+    [int]$MaxLogBytes = 24000
+) {
+    if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw 'Repository must be in owner/repo format.' }
+    $cleanTitle = Format-SupportRedactedText $Title -SingleLine
+    if ([string]::IsNullOrWhiteSpace($cleanTitle)) { throw 'Enter a short issue title before preparing the report.' }
+    if ($cleanTitle.Length -gt 120) { $cleanTitle = $cleanTitle.Substring(0, 120).TrimEnd() }
+    $cleanDescription = Format-SupportRedactedText $Description
+    if ([string]::IsNullOrWhiteSpace($cleanDescription)) { throw 'Describe what happened before preparing the report.' }
+    $logs = @()
+    foreach ($logPath in $LogPaths) {
+        if (-not [string]::IsNullOrWhiteSpace($logPath)) { $logs += Read-SupportLogTail $logPath $MaxLogBytes }
+    }
+    $lines = New-Object Collections.Generic.List[string]
+    $lines.Add('## Summary')
+    $lines.Add($cleanDescription)
+    $lines.Add('')
+    $lines.Add('## Product')
+    $lines.Add("- Product: $(Format-SupportRedactedText $ProductName -SingleLine)")
+    $lines.Add("- Version: $(Format-SupportRedactedText $ProductVersion -SingleLine)")
+    $lines.Add("- Repository: https://github.com/$Repository")
+    if (-not [string]::IsNullOrWhiteSpace($EntryPoint)) {
+        $lines.Add("- Help entry point: $(Format-SupportRedactedText $EntryPoint -SingleLine)")
+    }
+    $lines.Add('')
+    if ($null -ne $EnvironmentSummary -and $EnvironmentSummary.Count -gt 0) {
+        $lines.Add('## Environment')
+        foreach ($key in $EnvironmentSummary.Keys) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$key)) {
+                $lines.Add("- $(Format-SupportRedactedText ([string]$key) -SingleLine): $(Format-SupportRedactedText ([string]$EnvironmentSummary[$key]) -SingleLine)")
+            }
+        }
+        $lines.Add('')
+    }
+    if ($null -ne $SelectedSummary -and $SelectedSummary.Count -gt 0) {
+        $lines.Add('## Selected diagnostics')
+        foreach ($key in $SelectedSummary.Keys) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$key)) {
+                $lines.Add("- $(Format-SupportRedactedText ([string]$key) -SingleLine): $(Format-SupportRedactedText ([string]$SelectedSummary[$key]) -SingleLine)")
+            }
+        }
+        $lines.Add('')
+    }
+    if ($logs.Count -gt 0) {
+        $lines.Add('## Included logs')
+        foreach ($log in $logs) {
+            $lines.Add("### $(Format-SupportRedactedText $log.FileName -SingleLine) ($($log.Status))")
+            if ($log.Included -and -not [string]::IsNullOrWhiteSpace($log.Content)) {
+                $fence = '```'
+                while ($log.Content.Contains($fence)) { $fence += '`' }
+                $lines.Add("${fence}text")
+                $lines.Add($log.Content)
+                $lines.Add($fence)
+            }
+            $lines.Add('')
+        }
+    }
+    $preview = ($lines -join "`n").TrimEnd() + "`n"
+    [pscustomobject]@{
+        ProductName    = $ProductName
+        ProductVersion = $ProductVersion
+        Repository     = $Repository
+        EntryPoint     = $EntryPoint
+        Title          = $cleanTitle
+        Description    = $cleanDescription
+        Preview        = $preview
+        Logs           = $logs
+        RequireReview  = $true
+    }
+}
+
+function New-SupportBrowserSubmission($PreparedReport, [switch]$UserReviewed, [int]$MaxUriLength = 4096) {
+    if ($null -eq $PreparedReport) { throw 'PreparedReport is required.' }
+    if (-not $UserReviewed) { throw 'Review the prepared report before opening the issue draft.' }
+    if ($MaxUriLength -lt 512 -or $MaxUriLength -gt 32768) { throw 'MaxUriLength must be between 512 and 32768.' }
+    $baseUrl = "https://github.com/$($PreparedReport.Repository)/issues/new"
+    $escapedTitle = [Uri]::EscapeDataString($PreparedReport.Title)
+    $escapedBody = [Uri]::EscapeDataString($PreparedReport.Preview)
+    $fullUrl = "${baseUrl}?title=${escapedTitle}&body=${escapedBody}"
+    if ($fullUrl.Length -le $MaxUriLength) {
+        return [pscustomobject]@{
+            Url               = $fullUrl
+            BodyIncludedInUrl = $true
+            Notice            = 'Review the GitHub issue page before clicking Submit new issue.'
+        }
+    }
+    $compactBody = ($PreparedReport.Description + "`n`n_Full reviewed diagnostics were too long for a single URL. Paste the reviewed report preview or attach the saved .txt report._")
+    $escapedCompact = [Uri]::EscapeDataString($compactBody)
+    $compactUrl = "${baseUrl}?title=${escapedTitle}&body=${escapedCompact}"
+    if ($compactUrl.Length -gt $MaxUriLength) { $compactUrl = "${baseUrl}?title=${escapedTitle}" }
+    [pscustomobject]@{
+        Url               = $compactUrl
+        BodyIncludedInUrl = $false
+        Notice            = 'The reviewed report exceeded the safe browser URL length. Paste the reviewed preview or attach the saved .txt report on GitHub before submitting.'
+    }
+}
+
+function Save-SupportReviewFile($PreparedReport, [string]$Path, [switch]$UserReviewed) {
+    if ($null -eq $PreparedReport) { throw 'PreparedReport is required.' }
+    if (-not $UserReviewed) { throw 'Review the prepared report before saving the issue report.' }
+    if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Choose a destination path for the text report.' }
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if (-not $fullPath.EndsWith('.txt', [StringComparison]::OrdinalIgnoreCase)) { throw 'Support reports must be saved as plain .txt files.' }
+    $parent = Split-Path $fullPath -Parent
+    if ([string]::IsNullOrWhiteSpace($parent) -or -not [IO.Directory]::Exists($parent)) { throw 'Choose an existing folder for the text report.' }
+    $content = "# Issue Title: $($PreparedReport.Title)`n`n$($PreparedReport.Preview)".Replace("`n", [Environment]::NewLine)
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($content)
+    $stream = New-Object IO.FileStream($fullPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try {
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+    } finally { $stream.Dispose() }
+}
+
+Export-ModuleMember -Function Read-SavedWheelActions,Get-WheelButtonActions,Resolve-WheelActionSlot,Get-WheelAxisFields,Get-ButtonCaptureSource,Get-SettingsView,Save-SettingsView,Get-WheelBlock,Get-WheelField,Set-WheelField,Format-WheelAssignment,Get-AxisSamples,Get-DeviceInputPreview,Read-WheelInput,Find-AxisMapping,Save-WheelConfig,Get-ModSetting,Set-ModSetting,Get-TelemetryState,Assert-TelemetryConnection,Get-TelemetryReceiver,Get-TelemetryConnectionSummary,Set-TelemetryFields,Save-TelemetryConfig,Get-ModHelpLinks,Format-SupportRedactedText,Read-SupportLogTail,New-PreparedSupportReport,New-SupportBrowserSubmission,Save-SupportReviewFile

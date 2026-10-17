@@ -227,7 +227,7 @@ function Edit-Axis([string]$Name) {
     try {
         Say '  Finish or cancel this binding before changing view.' 'DarkGray'
         Say '  Keep other controls still. Esc cancels input capture.'
-        if ($Name -eq 'Steering') { $prompt = 'Centre the wheel' }
+        if ($Name -eq 'Steering') { $prompt = 'Center the wheel' }
         else { $prompt = 'Release this pedal or handbrake' }
         if ((Read-Host "  $prompt. Enter to measure rest, or C to cancel") -eq 'c') { return }
         $rest = @(Sample 2)
@@ -246,7 +246,7 @@ function Edit-Axis([string]$Name) {
             $choice = Read-Host "  $(Assignment $mapping.Value). [S] Save binding  [Enter] Cancel"
         }
         if ($choice -eq 's') { Set-Field $field $mapping.Value; Ok "$Name ready to save" }
-        else { Say '  Cancelled. The previous assignment was kept.' }
+        else { Say '  Canceled. The previous assignment was kept.' }
     } catch { Warn $_.Exception.Message }
 }
 
@@ -276,7 +276,7 @@ function Edit-Button([string]$Name) {
         if ((Read-Host "  Button $button. [S] Save binding  [Enter] Cancel") -eq 's') {
             Set-Field $slot $value
             Ok "$Name ready to save"
-        } else { Say '  Cancelled. The previous assignment was kept.' }
+        } else { Say '  Canceled. The previous assignment was kept.' }
     } catch { Warn $_.Exception.Message }
 }
 
@@ -329,7 +329,7 @@ function Show-DeviceInputPreview {
         }
         if (-not $seen) { Warn 'No device samples received. Check the connection and retry.' }
         else { Say '  Preview finished. No settings were saved.' }
-    } catch [OperationCanceledException] { Say '  Preview cancelled. No settings were saved.' }
+    } catch [OperationCanceledException] { Say '  Preview canceled. No settings were saved.' }
     catch { Warn "Preview stopped. No settings were saved. $($_.Exception.Message)" }
     finally {
         if ($null -ne $anchor) { try { [Console]::SetCursorPosition(0, $anchor + $names.Count + 1) } catch { } }
@@ -383,10 +383,72 @@ function Edit-TelemetryConnection {
                     return
                 } catch { Warn "Connection was not applied. $($_.Exception.Message)" }
             }
-            'c' { Say '  Cancelled. The saved connection was kept.'; return }
+            'c' { Say '  Canceled. The saved connection was kept.'; return }
             default { Warn 'Finish or cancel the current edit to change view.' }
         }
     }
+}
+
+function Open-HelpDestination([string]$Url, [string]$Label) {
+    if ($Url -notmatch '^https://github\.com/') { throw 'Only HTTPS GitHub destinations can be opened from Help.' }
+    if ($env:MILESTONE_UX_BROWSER_OUT) {
+        [IO.File]::AppendAllText($env:MILESTONE_UX_BROWSER_OUT, "$Url`r`n")
+    } else {
+        Start-Process $Url | Out-Null
+    }
+    Ok "Opened $Label ($Url)"
+}
+
+function Invoke-SupportIssueFlow {
+    Head 'Help - Submit issue'
+    Say '  Prepare a diagnostic report. Nothing is sent or written until you review the full preview.'
+    $title = Read-Host '  Issue title (Enter to cancel)'
+    if ([string]::IsNullOrWhiteSpace($title)) { Say '  Canceled. No report was created.'; return }
+    $description = Read-Host '  What happened and steps to reproduce (Enter to cancel)'
+    if ([string]::IsNullOrWhiteSpace($description)) { Say '  Canceled. No report was created.'; return }
+    $logCandidate = Join-Path (Split-Path $telemetryPath -Parent) 'milestone_mod.log'
+    $selectedLogs = @()
+    if (Test-Path -LiteralPath $logCandidate -PathType Leaf) {
+        $includeLog = Read-Host '  Include milestone_mod.log tail (up to 24 KB, paths redacted)? [y/N]'
+        if ($includeLog -eq 'y') { $selectedLogs += $logCandidate }
+    }
+    try {
+        $versionFile = Join-Path $root 'VERSION'
+        $version = if (Test-Path -LiteralPath $versionFile -PathType Leaf) { ([IO.File]::ReadAllText($versionFile)).Trim() } else { 'unknown' }
+        $envSummary = [ordered]@{
+            'OS'         = [Environment]::OSVersion.VersionString
+            'PowerShell' = $PSVersionTable.PSVersion.ToString()
+            'View'       = $View
+        }
+        $telemetrySummary = try {
+            $t = (Read-TelemetrySnapshot).State
+            "enabled=$($t.enabled), format=$($t.format), port=$($t.port)"
+        } catch { 'not installed or unreadable' }
+        $selectedSummary = [ordered]@{
+            'Game'      = if ($isGravel) { 'Gravel' } else { 'Milestone game' }
+            'Device'    = "$($dev.Name) ($($dev.Key))"
+            'Steering'  = (Assignment (Get-Field $AXES['Steering']))
+            'Throttle'  = (Assignment (Get-Field $AXES['Throttle']))
+            'Brake'     = (Assignment (Get-Field $AXES['Brake']))
+            'Telemetry' = $telemetrySummary
+        }
+        $report = New-PreparedSupportReport -ProductName 'Gravel' -ProductVersion $version -Repository 'd-b-c-e/dbce-mods-gravel' -EntryPoint 'WheelSetup.ps1' -Title $title -Description $description -EnvironmentSummary $envSummary -SelectedSummary $selectedSummary -LogPaths $selectedLogs
+        Head 'Review prepared issue report'
+        Say $report.Preview
+        $action = Read-Host '  [O] Open GitHub issue draft (reviewed)  [E] Export reviewed .txt report  [Enter] Cancel'
+        if ($action -eq 'o') {
+            $submission = New-SupportBrowserSubmission $report -UserReviewed
+            Open-HelpDestination $submission.Url 'GitHub issue draft'
+            Say "  $($submission.Notice)"
+        } elseif ($action -eq 'e') {
+            $exportPath = Read-Host '  Save .txt path (must not exist, Enter to cancel)'
+            if ([string]::IsNullOrWhiteSpace($exportPath)) { Say '  Canceled. No report was saved.'; return }
+            Save-SupportReviewFile $report $exportPath -UserReviewed
+            Ok "Saved reviewed report: $exportPath"
+        } else {
+            Say '  Canceled. No report was sent or saved.'
+        }
+    } catch { Warn $_.Exception.Message }
 }
 
 $page = 'Setup'
@@ -438,11 +500,15 @@ while ($true) {
             } catch { Warn $_.Exception.Message; Say '  No telemetry setting has been changed.' }
         }
         'Help' {
+            $links = Get-ModHelpLinks
             Say '  Close the game before setup. Select an axis to bind; Save mappings and exit writes a backup.'
             Say '  No movement? Reconnect the device and reopen setup. Wrong direction? Bind that axis again and invert its direction.'
             Say '  Gravel is hardware-verified. Other Milestone games still need validation.'
             Say '  The tool uses the terminal text size. Ctrl+C exits without saving pending mappings.'
             Say '  F6 is not available in this mod. Reopen WheelSetup.bat to change controls.'
+            Say '  [I] Submit issue (review diagnostics before opening GitHub or saving .txt)'
+            Say "  $($links.ModLabel): $($links.ModUrl)  |  $($links.WheelkitLabel): $($links.WheelkitUrl)" 'DarkGray'
+            Say '  [M] Mod on GitHub  [W] Wheelkit on GitHub' 'DarkGray'
             if ($View -eq 'Advanced') { Say "  Device key: $($dev.Key) ($($dev.Type))"; Say "  Mapping file: $wc"; Say "  View preference: $PreferencesPath" }
         }
     }
@@ -450,6 +516,9 @@ while ($true) {
     $command = Read-Host '  Choose'
     if ($command -match '^[1-6]$') { $page = @('Setup','Controls','FFB','Cameras','Telemetry','Help')[[int]$command - 1]; continue }
     switch ($command) {
+        'i' { if ($page -eq 'Help') { Invoke-SupportIssueFlow } }
+        'm' { if ($page -eq 'Help') { try { $links = Get-ModHelpLinks; Open-HelpDestination $links.ModUrl $links.ModLabel } catch { Warn $_.Exception.Message } } }
+        'w' { if ($page -eq 'Help') { try { $links = Get-ModHelpLinks; Open-HelpDestination $links.WheelkitUrl $links.WheelkitLabel } catch { Warn $_.Exception.Message } } }
         { $_ -in @('o','n') } {
             if ($page -eq 'Telemetry') {
                 try {
