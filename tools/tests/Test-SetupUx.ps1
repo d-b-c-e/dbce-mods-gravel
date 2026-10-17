@@ -382,7 +382,8 @@ class FixtureProbe {
 
     $links = Get-ModHelpLinks
     Assert ($links.ModUrl -ceq 'https://github.com/d-b-c-e/dbce-mods-gravel' -and $links.WheelkitUrl -ceq 'https://github.com/d-b-c-e/dbce-wheelkit') 'Help links must name the mod and Wheelkit GitHub repositories.'
-    $redacted = Format-SupportRedactedText "Path C:\Users\Alice\AppData\Local\Gravel mail alice@example.com token=secret123 ghp_1234567890abcdefghij1234567890"
+    # Labels follow the canonical core's documented credential set; Core's C# fixture owns redaction coverage.
+    $redacted = Format-SupportRedactedText "Path C:\Users\Alice\AppData\Local\Gravel mail alice@example.com password=secret123 ghp_1234567890abcdefghij1234567890"
     Assert ($redacted -notmatch 'Alice|alice@example\.com|secret123|ghp_' -and $redacted.Contains('%USERPROFILE%') -and $redacted.Contains('[redacted email]') -and $redacted.Contains('[redacted]')) 'Redaction must strip user paths, emails and credentials.'
     Assert-Throws { Read-SupportLogTail '\\server\share\milestone_mod.log' } 'UNC log paths must be refused.'
     $binaryLog = Join-Path $fixture 'binary.log'
@@ -392,11 +393,11 @@ class FixtureProbe {
     [IO.File]::WriteAllBytes($invalidLog, [byte[]]@(0x61, 0xC3, 0x28))
     Assert-Throws { New-PreparedSupportReport -ProductName 'Gravel' -ProductVersion '1' -Repository 'd-b-c-e/dbce-mods-gravel' -Title 'Invalid log' -Description 'Steps' -LogPaths @($invalidLog) } 'An invalid selected log must fail preparation rather than silently omit evidence.'
     $modLog = Join-Path $telemetryFolder 'milestone_mod.log'
-    $longLogLines = (1..30 | ForEach-Object { "line $_ from C:\Users\OwnerName\Gravel token=abc$_" }) -join "`r`n"
+    $longLogLines = (1..30 | ForEach-Object { "line $_ from C:\Users\OwnerName\Gravel password=abc$_" }) -join "`r`n"
     [IO.File]::WriteAllText($modLog, $longLogLines)
     $tail = Read-SupportLogTail $modLog 300
     Assert ($tail.Included -and $tail.Truncated -and $tail.Content -notmatch 'OwnerName|abc' -and $tail.Content.Contains('[Last 300 bytes only; partial first line omitted]')) 'Log tail must truncate cleanly on a line boundary and redact paths/secrets.'
-    [IO.File]::WriteAllText($modLog, 'Latest log from C:\Users\OwnerName\Gravel token=secret-value')
+    [IO.File]::WriteAllText($modLog, 'Latest log from C:\Users\OwnerName\Gravel password=secret-value')
     $prepared = New-PreparedSupportReport -ProductName 'Gravel' -ProductVersion '0.1.0' -Repository 'd-b-c-e/dbce-mods-gravel' -EntryPoint 'WheelSetup.ps1' -Title 'Wheel setup test' -Description 'Pedal axis test for C:\Users\OwnerName\Gravel' -EnvironmentSummary @{ OS='Windows' } -SelectedSummary @{ Game='Gravel' } -LogPaths @($modLog)
     Assert ($prepared.Preview.Contains('## Selected mod logs (redacted)') -and $prepared.Preview -notmatch 'OwnerName') 'Prepared report must include redacted log preview and require review.'
     $reviewedSnapshot = $prepared.Preview
