@@ -1,4 +1,4 @@
-param([switch]$NativeBindingsOnly, [switch]$HelpOnly, [switch]$CameraStepsOnly)
+param([switch]$NativeBindingsOnly, [switch]$HelpOnly, [switch]$CameraStepsOnly, [switch]$AxisInvertOnly)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Import-Module (Join-Path $repo 'tools\SetupUx.psm1') -Force
@@ -20,6 +20,66 @@ $oldPreviewMode = $env:MILESTONE_UX_PREVIEW
 $oldProbePid = $env:MILESTONE_UX_PROBE_PID
 $oldBrowserOut = $env:MILESTONE_UX_BROWSER_OUT
 try {
+    if ($AxisInvertOnly) {
+        foreach ($axis in 1..8) {
+            $normal = "Axis$axis&1.0&0.0"; $inverted = "Axis$axis&-1.0&1.0"
+            Assert ((Get-InvertedAxisMapping $normal) -ceq $inverted) 'Normal axis did not invert.'
+            Assert ((Get-InvertedAxisMapping $inverted) -ceq $normal) 'Inverted axis did not restore.'
+            Assert ((Get-DeviceInputPreview $inverted @(0,0,0,0,0,0,0,0)).Value -eq 1) 'Inversion did not reverse released/full preview.'
+        }
+        Assert ((Get-InvertedAxisMapping 'Axis3&1&0') -ceq 'Axis3&-1.0&1.0') 'Existing integer-form transform was refused.'
+        foreach ($bad in '', 'Button1', 'Axis0&1.0&0.0', 'Axis9&1.0&0.0', 'Axis3&0.5&0.2', 'Axis1', "Axis1&1.0&0.0`nunsafe=1", "Axis1&1.0&0.0`n") {
+            Assert-Throws { Get-InvertedAxisMapping $bad } 'Unknown assignment was inverted.'
+        }
+
+        $tokens=$null; $parseErrors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $repo 'WheelSetup.ps1'),[ref]$tokens,[ref]$parseErrors)
+        Assert (!$parseErrors.Count) 'Setup script failed to parse.'
+        foreach ($name in 'Edit-Axis','Get-Field','Set-Field','Assignment') {
+            $definition=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true))
+            Assert ($definition.Count -eq 1) 'Production binding editor function was not unique.'
+            Invoke-Expression $definition[0].Extent.Text
+        }
+        function Say($m) {} function Head($m) {} function Ok($m) {} function Warn($m) { $script:invertWarnings += [string]$m }
+        function Sample { throw 'Invert must never acquire or sample a device.' }
+        function Read-Host { param($Prompt) if (!$script:invertAnswers.Count) { throw 'Invert fixture answers exhausted.' }; $script:invertAnswers.Dequeue() }
+        $dev=[pscustomobject]@{Key='fixture'}; $View='Simple'
+        $original="[/Wheel.Config/fixture]`r`nWheel_Steer=Axis1&1.0&0.0`r`nWheel_Generic_Axis2=Axis6&-1.0&1.0`r`nForceFeedback=0.0`r`nOwnerCustom=keep`r`n`r`n[/Wheel.Config/other]`r`nWheel_Steer=Axis2&1.0&0.0`r`n"
+        $AXES=Get-WheelAxisFields @{Throttle='Wheel_Generic_Axis2'; Brake=@('Wheel_Brake','Wheel_Generic_Axis1')}
+        $wc=Join-Path $fixture 'WheelConfig.ini'
+        foreach ($case in @(
+            @{Name='Steering';Answers=@('i','s');Field='Wheel_Steer';Value='Axis1&-1.0&1.0'},
+            @{Name='Steering';Answers=@('i','');Field='Wheel_Steer';Value='Axis1&1.0&0.0'},
+            @{Name='Throttle';Answers=@('i','s');Field='Wheel_Generic_Axis2';Value='Axis6&1.0&0.0'},
+            @{Name='Brake';Answers=@();Field='Wheel_Steer';Value='Axis1&1.0&0.0'},
+            @{Name='Clutch';Answers=@();Field='Wheel_Steer';Value='Axis1&1.0&0.0'},
+            @{Name='Steering';Answers=@('i');Custom=$true;Field='Wheel_Steer';Value='Axis1&0.5&0.2'},
+            @{Name='Steering';Answers=@();Duplicate=$true;Field='Wheel_Steer';Value='Axis1&1.0&0.0'}
+        )) {
+            $before=$original
+            if($case.Custom){$before=$before.Replace('Axis1&1.0&0.0','Axis1&0.5&0.2')}
+            if($case.Duplicate){$before=$before.Replace('Wheel_Steer=Axis1&1.0&0.0',"Wheel_Steer=Axis1&1.0&0.0`r`nWheel_Steer=Axis8&1.0&0.0")}
+            [IO.File]::WriteAllText($wc,$before); $script:raw=$before; $script:invertWarnings=@()
+            $script:invertAnswers=New-Object 'Collections.Generic.Queue[string]'
+            foreach($answer in $case.Answers){$script:invertAnswers.Enqueue($answer)}
+            Edit-Axis $case.Name
+            Assert ($script:invertAnswers.Count -eq 0) 'Editor did not consume the expected interaction.'
+            Assert ((Get-WheelField $script:raw 'fixture' $case.Field) -ceq $case.Value) 'Editor changed the wrong slot or failed to preserve a refused assignment.'
+            Assert ([IO.File]::ReadAllText($wc) -ceq $before) 'An inversion wrote to disk before final Save.'
+            $expected=if($case.Value -eq 'Axis1&-1.0&1.0'){$before.Replace('Wheel_Steer=Axis1&1.0&0.0', 'Wheel_Steer=Axis1&-1.0&1.0')}
+                elseif($case.Value -eq 'Axis6&1.0&0.0'){$before.Replace('Wheel_Generic_Axis2=Axis6&-1.0&1.0', 'Wheel_Generic_Axis2=Axis6&1.0&0.0')}else{$before}
+            Assert ($script:raw -ceq $expected) 'Invert changed unrelated bindings, force, owner fields or CRLF.'
+            if($case.Custom -or $case.Duplicate -or !$case.Answers.Count){Assert ($script:invertWarnings.Count -eq 1) 'Refusal did not explain why the assignment was kept.'}
+            if($script:raw -cne $before){
+                $backup=Save-WheelConfig $wc $before $script:raw
+                Assert ([IO.File]::ReadAllText($backup) -ceq $before) 'Final Save lost the original backup.'
+                Assert ([IO.File]::ReadAllText($wc) -ceq $expected) 'Final Save did not persist the staged inversion.'
+                Assert-Throws { Save-WheelConfig $wc $before $script:raw } 'Stale mapping save was accepted.'
+            }
+        }
+        Write-Host "PASS: $checks axis inversion checks. Synthetic mappings and production editor only; no device/game."
+        return
+    }
     if ($CameraStepsOnly) {
         # Only INI helpers and the actual draft editor, with fake console/process boundaries.
         # No input-reader process, device, game, browser or visible console host is opened.

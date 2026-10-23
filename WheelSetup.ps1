@@ -213,12 +213,22 @@ function Resolve-Slot($Name) {
 
 function Edit-Axis([string]$Name) {
     $field = $AXES[$Name]
-    if (-not $field -or -not [regex]::IsMatch((Get-WheelBlock $script:raw $dev.Key).Value,
-        '(?m)^' + [regex]::Escape($field) + '=')) {
+    if (-not $field -or [regex]::Matches((Get-WheelBlock $script:raw $dev.Key).Value,
+        '(?m)^' + [regex]::Escape($field) + '=').Count -ne 1) {
         Warn 'No unique saved axis mapping and existing wheel field. The previous assignment was kept.'; return
     }
     Head "$Name - $(Assignment (Get-Field $field))"
-    $choice = Read-Host '  [B] Bind  [C] Clear  [Enter] Cancel'
+    $choice = Read-Host '  [B] Bind  [I] Invert direction  [C] Clear  [Enter] Cancel'
+    if ($choice -eq 'i') {
+        try {
+            $value = Get-InvertedAxisMapping (Get-Field $field)
+            if ((Read-Host "  $(Assignment $value). [S] Save binding  [Enter] Cancel") -eq 's') {
+                Set-Field $field $value
+                Ok "$Name ready to save"
+            } else { Say '  Canceled. The previous assignment was kept.' }
+        } catch { Warn $_.Exception.Message }
+        return
+    }
     if ($choice -eq 'c') {
         if ((Read-Host "  Clear $Name? Type Clear, or Enter to cancel") -eq 'Clear') { Set-Field $field '' }
         return
@@ -560,7 +570,7 @@ while ($true) {
         'Help' {
             $links = Get-ModHelpLinks
             Say '  Close the game before setup. Select an axis to bind; Save mappings and exit writes a backup.'
-            Say '  No movement? Reconnect the device and reopen setup. Wrong direction? Bind that axis again and invert its direction.'
+            Say '  No movement? Reconnect the device and reopen setup. Wrong direction? Choose that axis, then Invert direction.'
             Say '  Gravel is hardware-verified. Other Milestone games still need validation.'
             Say '  The tool uses the terminal text size. Ctrl+C exits without saving pending mappings.'
             Say '  F6 is not available in this mod. Reopen WheelSetup.bat to change controls.'
