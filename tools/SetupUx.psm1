@@ -223,6 +223,14 @@ function Get-DeviceInputPreview([string]$Mapping, [int[]]$Values, [switch]$Steer
     [pscustomobject]@{ Available=$true; Label=$label; Value=$value; Raw=$raw; Clamped=($raw -lt 0 -or $raw -gt 65535) }
 }
 
+function Get-InvertedAxisMapping([string]$Mapping) {
+    if ($Mapping -notmatch '^Axis([1-8])&(1(?:\.0+)?&0(?:\.0+)?|-1(?:\.0+)?&1(?:\.0+)?)\z') {
+        throw 'Invert is unavailable for this assignment. Bind the axis first; custom transforms are kept.'
+    }
+    $polarity = if ($Matches[2].StartsWith('-')) { '1.0&0.0' } else { '-1.0&1.0' }
+    return "Axis$($Matches[1])&$polarity"
+}
+
 function Read-WheelInput([string]$Probe, [string]$Product, [ValidateRange(1,30)][int]$Seconds, [scriptblock]$CancellationRequested) {
     # One owner for one input-only process. All callers get the same bounded
     # cleanup on Esc, device error, native exit or a helper that stops responding.
@@ -461,4 +469,4 @@ function Get-ModHelpLinks {
     }
 }
 
-Export-ModuleMember -Function Read-SavedWheelActions,Get-WheelButtonActions,Resolve-WheelActionSlot,Get-WheelAxisFields,Get-ButtonCaptureSource,Get-SettingsView,Save-SettingsView,Get-WheelBlock,Get-WheelField,Set-WheelField,Format-WheelAssignment,Get-AxisSamples,Get-DeviceInputPreview,Read-WheelInput,Find-AxisMapping,Save-WheelConfig,Get-ModSetting,Set-ModSetting,Get-TelemetryState,Assert-TelemetryConnection,Get-TelemetryReceiver,Get-TelemetryConnectionSummary,Set-TelemetryFields,Save-TelemetryConfig,Get-CameraSteps,Set-CameraSteps,Save-CameraSteps,Get-ModHelpLinks,Format-SupportRedactedText,Read-SupportLogTail,New-PreparedSupportReport,New-SupportBrowserSubmission,Save-SupportReviewFile
+Export-ModuleMember -Function Read-SavedWheelActions,Get-WheelButtonActions,Resolve-WheelActionSlot,Get-WheelAxisFields,Get-ButtonCaptureSource,Get-SettingsView,Save-SettingsView,Get-WheelBlock,Get-WheelField,Set-WheelField,Format-WheelAssignment,Get-AxisSamples,Get-DeviceInputPreview,Get-InvertedAxisMapping,Read-WheelInput,Find-AxisMapping,Save-WheelConfig,Get-ModSetting,Set-ModSetting,Get-TelemetryState,Assert-TelemetryConnection,Get-TelemetryReceiver,Get-TelemetryConnectionSummary,Set-TelemetryFields,Save-TelemetryConfig,Get-CameraSteps,Set-CameraSteps,Save-CameraSteps,Get-ModHelpLinks,Format-SupportRedactedText,Read-SupportLogTail,New-PreparedSupportReport,New-SupportBrowserSubmission,Save-SupportReviewFile

@@ -38,6 +38,10 @@ to repair it; the previous file is backed up and its location is shown.
 Button numbers start at 1. Each axis has its own binding flow, so an
 optional clutch or handbrake never holds up basic setup. Cancel keeps the
 previous assignment; the final Save mappings and exit writes the pending mappings.
+To reverse an assigned axis, choose it in Controls, select **Invert direction**,
+then **Save binding**. This keeps the axis and needs no recapture. The final
+**Save mappings and exit** applies the change; Cancel or Exit keeps the saved
+mapping. Custom transforms must be rebound instead of inverted here.
 **Controls → Driving and menu buttons** also offers Reverse, individual gears
 and Look back when Gravel's saved action layout names their wheel slots. It
 keeps missing or ambiguous native slots unchanged and never writes the save.
