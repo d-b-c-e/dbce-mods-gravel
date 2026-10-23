@@ -66,15 +66,15 @@ struct Config {
     // discriminates a scrape from a crash. So velocity carries the magnitude.
     float    impactGain     = 80.0f;      // peak m/s^2 at full collision speed
     int      impactDecayMs  = 150;
-    // VehicleSpeed is 0..1 of the car's top speed; multiply to get m/s.
-    // Calibrate against the in-game speedo: m/s = kmh / 3.6.
+    // Fallback only: VehicleSpeed is 0..1 of each car's top speed, so this
+    // nominal m/s scale is uncalibrated. The [ue4] speedometer takes priority.
     float    fmodSpeedScale = 55.0f;
     // [ue4]
     bool     ue4Enabled   = true;
     bool     ue4Discover  = true;         // list matching property names once
     char     ue4Rpm[48]   = "VehicleCurrentRPM";
     char     ue4MaxRpm[48]= "VehicleMaxRPM";
-    char     ue4Speed[48] = "VehicleCurrentSpeed";
+    char     ue4Speed[48] = "VehicleCurrentSpeedKMH";  // Gravel's speedo field; no VehicleCurrentSpeed exists
     char     ue4Gear[48]  = "VehicleCurrentGear";
     float    speedScale   = 1.0f / 3.6f;  // raw -> m/s (default assumes km/h)
     int      gearOffset   = 0;            // added to raw gear before Forza mapping

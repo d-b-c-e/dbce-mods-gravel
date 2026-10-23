@@ -159,8 +159,9 @@ static DWORD WINAPI telemetryThread(LPVOID)
 
         bool ue = ue4Poll();
         recordingPoll();
-        // Gravel exposes no speed on the HUD widget, so FMOD's normalised
-        // VehicleSpeed is the source; a UE4 property wins where one exists.
+        // The HUD gauge's VehicleCurrentSpeedKMH is the game's own speedometer.
+        // FMOD's VehicleSpeed is 0..1 of each car's top speed, so its fixed
+        // scale is only a fallback while the gauge reads zero or is missing.
         float speed = 0.f;
         if (ue && g_ue4.speed.load() != 0.f) speed = g_ue4.speed.load() * g_cfg.speedScale;
         else if (g_fmod.speed >= 0.f) speed = g_fmod.speed.load() * g_cfg.fmodSpeedScale;
@@ -223,7 +224,9 @@ static DWORD WINAPI telemetryThread(LPVOID)
             sl.combinedSlip[i] = combined;
         }
         sl.drivetrain = 2; sl.cylinders = 4;
-        d.speed = speed; d.gear = (uint8_t)(gear < 0 ? 0 : gear > 10 ? 10 : gear);
+        // Forza's gear 0 renders as reverse and it has no neutral: the game's
+        // -1 reverse becomes 0, neutral (0) shows 1 (toolkit TELEMETRY-FORZA.md).
+        d.speed = speed; d.gear = (uint8_t)(gear < 0 ? 0 : gear == 0 ? 1 : gear > 10 ? 10 : gear);
         d.torque = torque * 400.f;               // normalised -> Nm, nominal
         d.power = torque * rpm * 0.05f;
         d.accel = u8(g_input.throttle); d.brake = u8(g_input.brake); d.clutch = u8(g_input.clutch);

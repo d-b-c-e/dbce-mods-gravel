@@ -77,9 +77,10 @@ at 244.
 | field                    | source                                   | real? |
 |--------------------------|------------------------------------------|-------|
 | Accel/Brake/Clutch/HandBrake/Steer | the game's own `GetDeviceState` reads | yes |
-| CurrentEngineRpm, EngineMaxRpm | UE4 HUD widget properties          | yes |
-| Gear                     | UE4 HUD widget property                  | yes |
-| Speed, VelocityZ         | FMOD `VehicleSpeed` × `speed_scale`      | yes (scale calibrated) |
+| CurrentEngineRpm, EngineMaxRpm | UE4 HUD widget `VehicleCurrentRPM`, `VehicleMaxRPM` | yes |
+| Gear                     | UE4 HUD `VehicleCurrentGear`: -1 reverse → 0, neutral 0 → 1 (Forza has no neutral), 1.. as is | yes |
+| Speed, VelocityZ         | UE4 HUD `VehicleCurrentSpeedKMH` ÷ 3.6 (the game's speedometer, m/s) | yes |
+|                          | fallback while that reads zero or is missing: FMOD `VehicleSpeed` (0..1 of the car's top speed) × `[fmod] speed_scale` | nominal, not calibrated per car |
 | TireSlipRatio ×4         | FMOD `LongitudinalSlip` — wheelspin / lockup | yes |
 | TireSlipAngle ×4         | FMOD `LateralSlip` — slide angle         | yes |
 | NormalizedSuspensionTravel ×4, SuspensionTravelMeters | FMOD `SuspensionMovement` | yes |

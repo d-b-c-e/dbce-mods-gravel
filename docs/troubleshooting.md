@@ -132,8 +132,15 @@ different one rather than break it.
 
 ## Speed reads wrong
 
-`speed_scale` under `[fmod]` converts the game's normalised speed to m/s.
-Compare the in-game speedometer with SimHub and scale accordingly:
+Speed comes from the HUD speedometer, `[ue4] speed=VehicleCurrentSpeedKMH`
+with `speed_scale=0.27778` (km/h to m/s). Older ini files name
+`VehicleCurrentSpeed`, which Gravel does not have: the log then says
+`property "VehicleCurrentSpeed" not found`. Change the name to
+`VehicleCurrentSpeedKMH`.
+
+`speed_scale` under `[fmod]` applies only to the fallback. It converts FMOD's
+normalised speed (0..1 of each car's top speed) to m/s, so it can only be
+right for one car. To tune it, compare the in-game speedometer with SimHub:
 
 ```
 new_scale = old_scale × (real_kmh / shown_kmh)

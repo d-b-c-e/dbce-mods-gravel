@@ -92,7 +92,7 @@ itself makes; force magnitudes come from the effects it sends to your wheel.
 That is the game's own data in flight, not anything reconstructed.
 
 **3. Finds the vehicle state.**
-RPM, gear and max RPM are read from the game's own dashboard widget through
+Speed, RPM, gear and max RPM are read from the game's own dashboard widget through
 UE4's reflection system — located by property *name*, so there are no
 version-specific offsets to break.
 
