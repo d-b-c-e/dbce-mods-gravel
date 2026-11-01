@@ -1,0 +1,7 @@
+{
+  "Repository": "dbce-wheel-mod-toolkit",
+  "SourceCommit": "462680dab5d6b5a6ea9000531ba1fa3bb6d2dd4e",
+  "SourcePath": "native/settings/dbce_ini_settings_win.hpp",
+  "SHA256": "F1D161E3900AE66B9380DD1D5E5DA714EE7C9258AC0B6A6FD85AEFE9985052AF",
+  "Qualification": "Offline native fixture only; no game or device run."
+}

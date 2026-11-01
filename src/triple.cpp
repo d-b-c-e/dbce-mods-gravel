@@ -29,6 +29,7 @@
 //
 // Every pattern must match exactly once, or that part stays stock and the log says why.
 #include "common.h"
+#include "vendor/settings/dbce_ini_settings_win.hpp"
 #include <dxgi.h>
 #include <algorithm>
 #include <cmath>
@@ -690,17 +691,21 @@ void applyCamera(int action, int count)
     ReleaseSRWLockExclusive(&g_camLock);
 }
 
+void showNotice(const char *text);
+
 void saveCamera()
 {
     char ini[MAX_PATH]; sidecarPath(ini, "milestone_mod.ini");
     const CameraOffsets c = cameraNow();
-    char b[32];
-    snprintf(b, sizeof b, "%.3f", c.x); WritePrivateProfileStringA("camera", "forward_m", b, ini);
-    snprintf(b, sizeof b, "%.3f", c.y); WritePrivateProfileStringA("camera", "right_m", b, ini);
-    snprintf(b, sizeof b, "%.3f", c.z); WritePrivateProfileStringA("camera", "up_m", b, ini);
-    snprintf(b, sizeof b, "%.1f", c.tilt); WritePrivateProfileStringA("camera", "tilt_down_deg", b, ini);
-    snprintf(b, sizeof b, "%.1f", c.fov); WritePrivateProfileStringA("camera", "fov_offset_deg", b, ini);
-    logf("[camera] saved forward %.2f right %.2f up %.2f m, tilt %.1f, fov %+.1f", c.x, c.y, c.z, c.tilt, c.fov);
+    char x[32], y[32], z[32], tilt[32], fov[32];
+    snprintf(x, sizeof x, "%.3f", c.x); snprintf(y, sizeof y, "%.3f", c.y); snprintf(z, sizeof z, "%.3f", c.z);
+    snprintf(tilt, sizeof tilt, "%.1f", c.tilt); snprintf(fov, sizeof fov, "%.1f", c.fov);
+    if (dbce::settings::save(ini, "camera", {{"forward_m", x}, {"right_m", y}, {"up_m", z}, {"tilt_down_deg", tilt}, {"fov_offset_deg", fov}}))
+        logf("[camera] saved forward %.2f right %.2f up %.2f m, tilt %.1f, fov %+.1f", c.x, c.y, c.z, c.tilt, c.fov);
+    else {
+        logf("[camera] could not save offsets (error %lu); previous file kept", GetLastError());
+        showNotice("Couldn't save camera settings");
+    }
 }
 
 bool gameInFront()
@@ -766,7 +771,7 @@ void viewKey()
         const bool original = !g_original.load();
         g_original = original;                // the render thread rebuilds the panels on its next projection
         char ini[MAX_PATH]; sidecarPath(ini, "milestone_mod.ini");
-        const bool saved = WritePrivateProfileStringA("triple", "view", original ? "original" : "angle", ini) != 0;
+        const bool saved = dbce::settings::save(ini, "triple", {{"view", original ? "original" : "angle"}});
         const DWORD err = saved ? 0 : GetLastError();
         const char *fail = saved ? "" : " - Couldn't save view";
         if (original) snprintf(text, sizeof text, "Original game view (1 of 2)%s", fail);
