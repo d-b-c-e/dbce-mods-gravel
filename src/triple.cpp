@@ -75,6 +75,11 @@ void early(const char *fmt, ...)
 std::atomic<bool> g_active{false};
 Frustum g_panels[3]{};                        // 0 left, 1 centre, 2 right
 std::atomic<float> g_panelFov{-1};            // game FOV the panels were computed for
+std::atomic<double> g_eyeMm{0};               // effective eye of the last panels (log)
+// F7 "Original game view": the three thirds of one flat plane, so the centre stays the game's
+// view and the sides continue it flat (one wide image, no angle correction).
+// shortcut: flat continuation, not the engine's own non-stereo wide view (unmeasured on Gravel); switch to stereo-off if the rig shows they differ.
+std::atomic<bool> g_original{false}, g_panelsFlat{false};   // chosen / last built
 SRWLOCK g_panelLock = SRWLOCK_INIT;
 
 using AdjustFn = void (*)(const void *, int, int *, int *, uint32_t *, uint32_t *);
@@ -106,7 +111,8 @@ Frustum panel(V3 pa, V3 pb, V3 pc)
 // rig's panel angle; or from the rig (fixed eye distance / vertical FOV).
 void computePanels(float gameFov)
 {
-    const double w = g_tc.panelW, h = g_tc.panelH, a = g_tc.side * Pi / 180;
+    const bool flat = g_original.load();
+    const double w = g_tc.panelW, h = g_tc.panelH, a = flat ? 0 : g_tc.side * Pi / 180, bezel = flat ? 0 : g_tc.bezel;
     double d;
     if (g_tc.fov == FovSource::Game && gameFov > 5 && gameFov < 170)
         d = w / 2 / std::tan(gameFov * Pi / 360);
@@ -115,14 +121,16 @@ void computePanels(float gameFov)
     V3 up{0, h, 0};
     Frustum p[3];
     p[1] = panel({-w / 2, -h / 2, d}, {w / 2, -h / 2, d}, {-w / 2, h / 2, d});
-    V3 toRight{std::cos(a), 0, -std::sin(a)}, rightInner = V3{w / 2, -h / 2, d} + toRight * g_tc.bezel;
+    V3 toRight{std::cos(a), 0, -std::sin(a)}, rightInner = V3{w / 2, -h / 2, d} + toRight * bezel;
     p[2] = panel(rightInner, rightInner + toRight * w, rightInner + up);
-    V3 toLeft{-std::cos(a), 0, -std::sin(a)}, leftInner = V3{-w / 2, -h / 2, d} + toLeft * g_tc.bezel;
+    V3 toLeft{-std::cos(a), 0, -std::sin(a)}, leftInner = V3{-w / 2, -h / 2, d} + toLeft * bezel;
     V3 leftOuter = leftInner + toLeft * w;
     p[0] = panel(leftOuter, leftInner, leftOuter + up);
     AcquireSRWLockExclusive(&g_panelLock);
     for (int i = 0; i < 3; ++i) g_panels[i] = p[i];
     g_panelFov = gameFov;
+    g_eyeMm = d;
+    g_panelsFlat = flat;
     ReleaseSRWLockExclusive(&g_panelLock);
 }
 
@@ -251,7 +259,7 @@ FMatrixF *hookProjection(const void *self, FMatrixF *out, int pass, float fov)
     int p = panelOf(pass);
     if (p < 0) return out;
     if (inGameplay()) fov = std::min(120.f, std::max(20.f, fov + cameraNow().fov));
-    if (std::fabs(fov - g_panelFov.load()) > 0.01f) computePanels(fov);
+    if (std::fabs(fov - g_panelFov.load()) > 0.01f || g_panelsFlat.load() != g_original.load()) computePanels(fov);
     Frustum f = panelFor(p);
     FMatrixF m{};
     m.M[0][0] = (float)(2 / (f.r - f.l));
@@ -702,15 +710,90 @@ bool gameInFront()
     return h && GetWindowThreadProcessId(h, &pid) && pid == GetCurrentProcessId();
 }
 
+// ------------------------------------------------------- F7 view comparison
+// Camera framing policy rev 3 (dbce-triple-screen-toolkit docs/camera-framing-and-comparison-policy.md): F7 in a race
+// steps Original game view / Angle correction (no curve renderer here, so two steps), names it for 2.5 s centred on
+// the centre screen and saves only [triple] view for the next start. The game has no overlay of ours, so the notice is
+// a topmost click-through window that never takes focus (triple layouts are always windowed, see hookSetFs). It is
+// owned and pumped by cameraThread.
+HWND g_notice = nullptr;
+ULONGLONG g_noticeUntil = 0;
+
+LRESULT CALLBACK noticeProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    if (m == WM_NCHITTEST) return HTTRANSPARENT;
+    if (m != WM_PAINT) return DefWindowProcW(h, m, w, l);
+    PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps);
+    RECT r; GetClientRect(h, &r);
+    FillRect(dc, &r, (HBRUSH)GetStockObject(BLACK_BRUSH));
+    wchar_t t[160] = L""; GetWindowTextW(h, t, 160);
+    HFONT f = CreateFontW(-(r.bottom - r.top) * 2 / 5, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+    HGDIOBJ old = SelectObject(dc, f);
+    SetBkMode(dc, TRANSPARENT); SetTextColor(dc, RGB(255, 255, 255));
+    DrawTextW(dc, t, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(dc, old); DeleteObject(f);
+    EndPaint(h, &ps);
+    return 0;
+}
+
+void showNotice(const char *text)
+{
+    const RECT s = g_layout.span;
+    const int W = s.right - s.left, H = s.bottom - s.top, w = W / 3 * 7 / 10, h = std::max(40, H / 14);
+    if (!g_notice) {
+        WNDCLASSW wc{}; wc.lpfnWndProc = noticeProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"DbceGravelNotice";
+        RegisterClassW(&wc);
+        g_notice = CreateWindowExW(WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                                   wc.lpszClassName, L"", WS_POPUP, s.left + (W - w) / 2, s.top + (H - h) / 2, w, h,
+                                   nullptr, nullptr, wc.hInstance, nullptr);
+        if (!g_notice) { logf("[triple] notice window failed (%lu)", GetLastError()); return; }
+        SetLayeredWindowAttributes(g_notice, 0, 220, LWA_ALPHA);
+    }
+    wchar_t wt[160]; MultiByteToWideChar(CP_UTF8, 0, text, -1, wt, 160);
+    SetWindowTextW(g_notice, wt);
+    InvalidateRect(g_notice, nullptr, TRUE);
+    SetWindowPos(g_notice, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    g_noticeUntil = GetTickCount64() + 2500;
+}
+
+void viewKey()
+{
+    char text[128];
+    if (!inGameplay()) {
+        snprintf(text, sizeof text, "View switching available while driving");
+        logf("[triple] F7 outside a race: no change, nothing saved");
+    } else {
+        const bool original = !g_original.load();
+        g_original = original;                // the render thread rebuilds the panels on its next projection
+        char ini[MAX_PATH]; sidecarPath(ini, "milestone_mod.ini");
+        const bool saved = WritePrivateProfileStringA("triple", "view", original ? "original" : "angle", ini) != 0;
+        const DWORD err = saved ? 0 : GetLastError();
+        const char *fail = saved ? "" : " - Couldn't save view";
+        if (original) snprintf(text, sizeof text, "Original game view (1 of 2)%s", fail);
+        else snprintf(text, sizeof text, "Angle correction - %s (2 of 2)%s", g_tc.fov == FovSource::Rig ? "Measured FOV" : "Game FOV", fail);
+        logf("[triple] F7: %s; framing %s, eye %.1f mm, curve none (no curved renderer)%s", text,
+             g_tc.fov == FovSource::Rig ? "rig" : "game", g_eyeMm.load(), saved ? "; saved [triple] view" : "");
+        if (!saved) logf("[triple] could not save [triple] view (error %lu); the file keeps its previous choice", err);
+    }
+    showNotice(text);
+}
+
 DWORD WINAPI cameraThread(LPVOID)
 {
     char cmdPath[MAX_PATH]; sidecarPath(cmdPath, "dbce-camera-cmd.txt");
     ULONGLONG down[CamCount] = {}, saveAt = 0;
+    bool f7Was = false;
     for (;;) {
         Sleep(30);
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
         const ULONGLONG now = GetTickCount64();
+        if (g_noticeUntil && now >= g_noticeUntil) { ShowWindow(g_notice, SW_HIDE); g_noticeUntil = 0; }
+        const bool front = gameInFront(), f7 = front && (GetAsyncKeyState(VK_F7) & 0x8000);
+        if (f7 && !f7Was) viewKey();
+        f7Was = f7;
         bool changed = false;
-        if (gameInFront() && inGameplay()) {
+        if (front && inGameplay()) {
             for (int a = 0; a < CamCount; ++a) {
                 const bool held = (GetAsyncKeyState(g_camKeys[a]) & 0x8000) != 0;
                 if (!held) { down[a] = 0; continue; }
@@ -724,6 +807,7 @@ DWORD WINAPI cameraThread(LPVOID)
                 while (fgets(line, sizeof line, f)) {
                     char word[32] = ""; int count = 1;
                     if (sscanf(line, "%31s %d", word, &count) < 1) continue;
+                    if (!_stricmp(word, "view")) { logf("[camera] command view"); viewKey(); continue; }   // F7, for unattended tests
                     for (int a = 0; a < CamCount; ++a)
                         if (!_stricmp(word, g_camNames[a])) { applyCamera(a, std::max(1, std::min(100, count))); changed = true; logf("[camera] command %s %d", word, count); }
                 }
@@ -745,6 +829,8 @@ void readTripleConfig()
     g_tc.mode = !_stricmp(v, "on") ? Mode::On : !_stricmp(v, "off") ? Mode::Off : Mode::Auto;
     GetPrivateProfileStringA("triple", "fov", "game", v, sizeof v, ini);
     g_tc.fov = !_stricmp(v, "rig") ? FovSource::Rig : FovSource::Game;
+    GetPrivateProfileStringA("triple", "view", "", v, sizeof v, ini);
+    g_original = !_stricmp(v, "original");   // missing or unrecognized: angle correction, as before; nothing written
     auto num = [&](const char *key, double def) {
         char b[32] = ""; GetPrivateProfileStringA("triple", key, "", b, sizeof b, ini);
         return b[0] ? atof(b) : def;
@@ -853,6 +939,7 @@ void tripleReport()
          g_layout.span.right - g_layout.span.left, g_layout.span.bottom - g_layout.span.top,
          g_tc.centre, g_tc.right, g_tc.left, g_tc.fov == FovSource::Game ? "game" : "rig", g_tc.panelW, g_tc.panelH, g_tc.side, g_tc.bezel);
     logf("[triple] displays: %s", g_layout.reason.c_str());
+    logf("[triple] view %s (F7 in a race: Original game view / Angle correction, saved as [triple] view)", g_original ? "original" : "angle");
     logf("[triple] ui %s; menus %s", g_origArrange ? "on the centre screen" : "across the window (stock)", g_tc.menuSidesBlack ? "centre only (sides black outside gameplay)" : "three views");
     { const CameraOffsets c = cameraNow(); logf("[camera] numpad keys in a race; offsets forward %.2f right %.2f up %.2f m, tilt %.1f, fov %+.1f; steps %.3f m, %.1f, %.1f deg", c.x, c.y, c.z, c.tilt, c.fov, g_moveStep, g_tiltStep, g_fovStep); }
     logf("[triple] at fov 90: centre l%.3f r%.3f b%.3f t%.3f; right yaw %.1f l%.3f r%.3f", c.l, c.r, c.b, c.t, r.yaw, r.l, r.r);

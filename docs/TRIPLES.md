@@ -104,6 +104,24 @@ No live camera or physical acceptance follows from these fixture results.
 | `eye_distance_mm`, `vertical_fov` | 0, 58.715 | `fov=rig` only |
 | `menu_sides_black` | 1 | side screens black outside a race |
 | `ui_centre` | 1 | menus and HUD on the centre screen |
+| `view` | (missing = `angle`) | written by F7 in a race: `original` or `angle` |
+
+## F7 view comparison (camera framing policy rev 3)
+
+Source 2026-11-01, not installed or rig-checked yet. F7 while driving steps **Original game view
+(1 of 2)** / **Angle correction - Game FOV (2 of 2)** (`Measured FOV` with `fov=rig`), shown
+for 2.5 s in a click-through, no-focus box centred on the centre screen, and saves `[triple] view`
+on each press. A failed save shows `Couldn't save view` and leaves the file as it was. In menus
+F7 shows `View switching available while driving` and changes nothing. There is no curved
+renderer, so there is no third step. The dev command file accepts `view` for unattended tests.
+
+"Original" draws the three thirds of one flat plane: the centre is unchanged and the sides
+continue it flat, as one wide image with no angle turn or bezel gap. That is how a Hor+ game
+looks spread over three screens. Nobody has compared it with Gravel's own non-stereo wide render
+(the engine might keep a different FOV axis), so check that at the rig before calling it the
+game's view. To check: F7 in a race, relaunch, and the same view is restored; F7 in a menu does
+nothing; the box never takes focus and does not flicker over the game. Also confirm Gravel has
+no action of its own on F7.
 
 ## Seen at the rig (unattended, "Sim Racing", 2026-10-06 03:55-05:35)
 
