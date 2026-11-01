@@ -813,6 +813,7 @@ DWORD WINAPI cameraThread(LPVOID)
                     char word[32] = ""; int count = 1;
                     if (sscanf(line, "%31s %d", word, &count) < 1) continue;
                     if (!_stricmp(word, "view")) { logf("[camera] command view"); viewKey(); continue; }   // F7, for unattended tests
+                    if (!_stricmp(word, "probe_camera")) { ue4RequestCameraProbe(); continue; }
                     for (int a = 0; a < CamCount; ++a)
                         if (!_stricmp(word, g_camNames[a])) { applyCamera(a, std::max(1, std::min(100, count))); changed = true; logf("[camera] command %s %d", word, count); }
                 }

@@ -302,9 +302,39 @@ void dumpClass(BYTE *owner, const char *label)
 }
 
 Prop g_pRpm, g_pMax, g_pSpeed, g_pGear;
+std::atomic<bool> g_cameraProbeRequested{false};
 BYTE *g_inst = nullptr; int g_instIdx = -1;
 ULONGLONG g_nextScan = 0, g_nextDiscover = 0;
 bool g_propsResolved = false;
+
+// Explicit developer request only. List candidates, never infer that the first camera is the player's.
+void probeCameras()
+{
+    const auto objs = snapshot();
+    std::vector<BYTE*> classes;
+    int shown = 0;
+    for (size_t i = 0; i < objs.size() && shown < 128; ++i) {
+        BYTE* o = objs[i]; uint32_t flags;
+        if (!o || !rd(o + O_FLAGS, flags) || (flags & (RF_CDO | RF_ARCHETYPE))) continue;
+        BYTE* cls = objClass(o);
+        const auto type = objName(cls);
+        auto low = type;
+        for (auto& ch : low) if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+        if (low.find("camera") == low.npos && low.find("playercontroller") == low.npos) continue;
+        BYTE* outer = nullptr; rd(o + O_OUTER, outer);
+        logf("[camera-probe] candidate #%zu %s : %s, outer %s", i, objName(o).c_str(), type.c_str(), objName(outer).c_str());
+        ++shown;
+        if (classes.size() < 12 && std::find(classes.begin(), classes.end(), cls) == classes.end()) {
+            classes.push_back(cls);
+            // Include inherited fields such as PlayerController.PlayerCameraManager and CameraComponent.FieldOfView.
+            for (int depth = 0; cls && depth < 8; ++depth) {
+                dumpClass(cls, objName(cls).c_str());
+                if (!rd(cls + S_SUPER, cls)) break;
+            }
+        }
+    }
+    logf("[camera-probe] done: %d candidates (limit 128), %zu class hierarchies (limit 12); active camera not established", shown, classes.size());
+}
 
 float readF(BYTE *o, const Prop &p) { float v; return (p.offset >= 0 && rd(o + p.offset, v)) ? v : 0.f; }
 int readI(BYTE *o, const Prop &p)
@@ -316,6 +346,8 @@ int readI(BYTE *o, const Prop &p)
 }
 
 } // namespace
+
+void ue4RequestCameraProbe() { g_cameraProbeRequested = true; }
 
 void ue4Init()
 {
@@ -365,6 +397,7 @@ bool ue4Poll()
         g_propsResolved = true;
         if (g_cfg.ue4Discover) dumpClass(g_pRpm.owner, g_pRpm.ownerName.c_str());
     }
+    if (g_cameraProbeRequested.exchange(false)) probeCameras();
     // validate the cached instance: same pointer still sits at its index
     if (g_inst) {
         BYTE *o = objAt(g_instIdx); uint32_t fl;

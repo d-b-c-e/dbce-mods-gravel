@@ -148,6 +148,7 @@ extern Ue4State   g_ue4;
 void proxyInit();          // called once, off the loader lock
 void fmodTapInstall();     // delay-load IAT hook
 void ue4Init();            // start discovery (idempotent)
+void ue4RequestCameraProbe(); // developer command; read-only discovery on the observation worker
 bool ue4Poll();            // refresh g_ue4; returns live
 void telemetryStart();     // spawn the sender thread
 void recordingInit();      // claim an optional expiring one-launch request
