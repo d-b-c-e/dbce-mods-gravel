@@ -1,0 +1,15 @@
+# Gravel D3D11 / pre-Slate seam trace - November 1
+
+Static evidence only. Installed Steam executable SHA256 28032B882FFF6DAE07B185B93FD5989ADE09DC36C2EC070ECC1D05B3A73D2A95, build 3477925. No target execution or graphics hook was performed.
+
+The existing unique constructor pattern resolves the fake-stereo vtable at preferred VA 0x143709588 (ASLR-relative RVA 0x3709588). Slots 3/5/6 resolve to the known AdjustViewRect/offset/projection paths already used by the mod. Entries 0..24 point into code; following data is UTF-16 text, so treating additional entries as callbacks is invalid.
+
+Slot 14 is a nontrivial candidate at preferred VA 0x1418AC040, unwind range ending 0x1418AC25D, 131 decoded instructions. It uses the RDX argument as a command-list-like structure, copies the R8 argument into a queued structure, reads +0x60/+0x64 from that argument, and emits queued callback pointers at 0x14099CAB0 and 0x1408E5FB0. These are observations of instructions, not recovered C++ types. No read of the R9 argument or direct D3D11 context operation was established in this function. Do not label the slot RenderTexture_RenderThread or install a hook solely from this shape.
+
+A scan of virtual calls at +0x70 has 501 decoded instruction matches across the executable. The offset alone is not a unique call-site witness. Exact interface/member identification, a typed caller trace, engine render-thread/RHI-thread order, native texture extraction and position relative to Slate/HUD are all unproven. Next static action: recover the queued callbacks and their RHI command implementations, then identify the actual stereo-device caller rather than selecting a generic +0x70 call. Run any heavyweight Ghidra analysis under the shared resource queue.
+
+Source-side facts: current hooks only patch fake-stereo slots 3/5/6 plus UI arrangement and DXGI factory/fullscreen routing. There is no Present hook or scene/HUD boundary callback in Gravel. Whole-backbuffer Present warping would also affect the HUD and is not an acceptable curved presenter. The shared D3D11 compositor can be used only after establishing a scene-only source and a correctly ordered render callback.
+
+Epic's current IStereoRendering documentation describes RenderTexture_RenderThread as rendering a texture into a backbuffer, but it does not identify this UE4.17 binary's slot or establish its UI order: https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Engine/IStereoRendering/RenderTexture_RenderThread . Treat that as interface context only, not version-specific evidence. Context7/REA tools are not exposed in this session; REA doctor reports stale registration and missing configured engines. Existing E:/Tools/ghidra_12.1.4_PUBLIC and jdk-21 were found, without changing global registration or installing anything. PE/Capstone performed the narrow byte inspection.
+
+Private raw evidence: artifacts/pre-slate-20261101/fake-stereo-vtable.json, slot14.asm, slot14-call-candidates.json. These contain derived commercial-binary material and stay ignored, outside the public source push.
