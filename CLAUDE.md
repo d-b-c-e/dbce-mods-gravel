@@ -121,10 +121,15 @@ problem. `mirror_port=` sends a copy to a second port so
 `tools/forza_listen.py <port> --lines` can decode packets while SimHub holds
 the real one.
 
-**Never hard-kill a game while a wheel is attached.** A running DirectInput
-constant-force effect is not released when the process dies, so the base keeps
-applying the last torque and the next launch reads as "no FFB". Close it
-gracefully.
+Prefer graceful closure. The owner superseded the old blanket no-hard-kill rule on
+2026-11-01 (hub `docs/agent-work-policy.md`, "Force-kill of your own stuck test
+processes"). Only a stuck test process you launched may be stopped by exact PID
+after image path and creation time match the retained launch record and graceful
+closure failed. Send the mod's force stop/zero and release first if available,
+then confirm wheel rest, restore snapshots byte-exact, verify the file set and
+release the lease. Never stop an owner's session or kill by process name. A
+latched DirectInput force can survive a process death; report actual force/rest
+observations and any remaining uncertainty rather than assuming physical safety.
 
 ## Verified facts (Gravel, UE 4.17, Steam 558260)
 

@@ -20,6 +20,14 @@ Developer recording work is documented in [Recording](docs/RECORDING.md).
 The current source candidate captures sampled signals; gameplay route playback
 and its runtime qualification are still pending.
 
+## Development status
+
+Current qualification, installed identity, rollback and ordered next steps are in the
+[November 1 handoff](docs/2026-11-01-mevu-handoff.md). Native atomic camera saves and
+an opt-in camera probe are source work; the current Game/Realistic F7 design,
+curved presentation, in-game F6 and gameplay route playback remain unfinished.
+The diagnostic DLL has not been promoted to a new supported package.
+
 ## First drive
 
 Close the game, extract the complete ZIP, run **Install.bat**, then open
