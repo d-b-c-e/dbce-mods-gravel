@@ -1,5 +1,7 @@
 # Working on this codebase
 
+Desktop routes (2026-11-03): follow the [route ladder](../../dbce-project-mgmt/skills/automated-testing/references/desktop-routes.md) and run `pwsh E:\Source\dbce-project-mgmt\tools\Test-DesktopRoutes.ps1`; if a route is down, continue on the next route within existing authorization and game safeguards.
+
 Orientation for anyone — human or agent — picking this up cold. The README
 explains what the project *does*; this explains how it works, what has actually
 been verified, and which traps cost real debugging time.
