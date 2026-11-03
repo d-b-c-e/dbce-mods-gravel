@@ -664,7 +664,7 @@ DWORD WINAPI spanThread(LPVOID)
 // one "forward|back|up|down|left|right|tiltdown|tiltup|wider|narrower|reset [count]" per line,
 // consumed and deleted. Changes are saved to [camera] 2 s after the last one.
 enum CamAction { CamForward, CamBack, CamUp, CamDown, CamLeft, CamRight, CamTiltDown, CamTiltUp, CamWider, CamNarrower, CamReset, CamCount };
-const int g_camKeys[CamCount] = {VK_NUMPAD8, VK_NUMPAD2, VK_NUMPAD9, VK_NUMPAD3, VK_NUMPAD4, VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD1, VK_ADD, VK_SUBTRACT, VK_NUMPAD5};
+const int g_camKeys[CamCount] = {VK_NUMPAD8, VK_NUMPAD2, VK_NUMPAD9, VK_NUMPAD3, VK_NUMPAD4, VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD1, VK_SUBTRACT, VK_ADD, VK_NUMPAD5};
 const char *g_camNames[CamCount] = {"forward", "back", "up", "down", "left", "right", "tiltdown", "tiltup", "wider", "narrower", "reset"};
 
 void applyCamera(int action, int count)
