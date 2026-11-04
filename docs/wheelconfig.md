@@ -20,6 +20,16 @@ devices, all pre-2018; no direct-drive base is present. `tools/wheelconfig.py`
 adds one by cloning a shipped block so every field the parser expects is
 present, in order.
 
+The CLI edits strict UTF-8 (optional BOM) with CRLF input; it retains each existing
+line ending, comments, spacing and unrelated bytes. Unsupported/damaged encodings,
+duplicate owned keys/sections, malformed or linked/read-only files refuse without
+rewriting. It flushes an exclusive sibling temporary file and atomically replaces
+the destination; a failed save leaves the original intact. Cloning appends without
+trimming the original EOF and saves an exclusive byte backup (`.bak`, or a unique
+suffix when one already exists). Close the game and other editors first; the source
+identity check is not a cross-process rename transaction. See
+[offline evidence](2026-11-03-wheelconfig-atomic.md).
+
 ### Axis numbering
 
 Derived from the shipped data (cross-checked on the G29, the Fanatec
