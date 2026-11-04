@@ -20,6 +20,7 @@ TEMPLATE = ("[/Wheel.Config/c262046d]\r\nProductName=Stock\r\nLayout=Stock\r\n"
             "Wheel_Clutch=\r\nWheel_Handbrake=\r\nWheel_LeftShoulder=Button13\r\n")
 TARGET = TEMPLATE.replace("c262046d", "0006346e").replace("ProductName=Stock", "  ProductName = Old   ; owned comment")
 SOURCE = ("; untouched café\r\n" + TEMPLATE + "\r\n" + TARGET + "[Other]\r\nunknown=keep").encode()
+CLI_SOURCE = SOURCE.replace(b"  ProductName = Old", b"ProductName=Old")
 
 
 class WriterTests(unittest.TestCase):
@@ -180,11 +181,11 @@ if __name__ == "__main__":
         root = Path(sys.argv[2])
         old, fixed = root / "baseline.ini", root / "fixed.ini"
         if sys.argv[1] == "--prepare-cli":
-            old.write_bytes(SOURCE)
-            fixed.write_bytes(SOURCE)
+            old.write_bytes(CLI_SOURCE)
+            fixed.write_bytes(CLI_SOURCE)
         else:
-            start = SOURCE.index(b"  ProductName")
-            expected = SOURCE[:start] + SOURCE[start:].replace(b"Old   ; owned comment", b"New   ; owned comment").replace(b"Layout=Stock", b"Layout=Generic", 1)
+            start = CLI_SOURCE.index(b"ProductName=Old")
+            expected = CLI_SOURCE[:start] + CLI_SOURCE[start:].replace(b"Old   ; owned comment", b"New   ; owned comment").replace(b"Layout=Stock", b"Layout=Generic", 1)
             assert old.read_bytes() != expected, "old writer must expose the regression"
             assert b"; owned comment" not in old.read_bytes(), "old writer must lose the target comment"
             assert fixed.read_bytes() == expected, "fixed actual CLI must retain all other bytes"
