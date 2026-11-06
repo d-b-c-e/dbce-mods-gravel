@@ -78,7 +78,9 @@ physical input, terminal readability at different DPI, force output or a drive.
 ```
 
 The 0.2.0 package supports **Gravel only**. `Install.ps1` requires its shipping
-executable and preserves existing config/profile bytes. `tools/InstallPackage.psm1`
+executable and preserves existing config/profile bytes; the one addition is the
+package `[camera]` block, appended once (same encoding, BOM and line endings) to
+settings that predate it, because the native writer never creates a section. `tools/InstallPackage.psm1`
 preflights all targets, backs up before writes, uses atomic replacement and rolls
 back partial changes. It also creates an empty-binding whitelist profile without
 Python when the existing verified G920 template is present. The owned setup tool

@@ -86,8 +86,25 @@ $ini = if ($null -ne $existing) { $existing } else { [IO.File]::ReadAllText((Joi
 if ($null -eq $existing -or $PSBoundParameters.ContainsKey('Product')) { $ini = Set-ModSetting $ini 'proxy' 'product' $productKey }
 if ($null -eq $existing -or $PSBoundParameters.ContainsKey('Port')) { $ini = Set-ModSetting $ini 'telemetry' 'port' ([string]$Port) }
 if ($null -eq $existing -or $PSBoundParameters.ContainsKey('Format')) { $ini = Set-ModSetting $ini 'telemetry' 'format' $Format }
-# Identical owner INIs are copied as bytes, so even encoding/BOM stays unchanged.
-$iniBytes = if ($null -ne $existing -and $ini -ceq $existing) { [IO.File]::ReadAllBytes($destIni) } else { [Text.UTF8Encoding]::new($false).GetBytes($ini) }
+# Settings from before the camera keys have no [camera] section, and the native writer never creates a section, so
+# numpad camera tuning could not be saved. Append the package defaults once; every existing line stays as it is.
+if ($null -ne $existing -and $ini -notmatch '(?m)^[ \t]*\[camera\]') {
+    $defaults = [IO.File]::ReadAllText((Join-Path $root 'games\gravel\milestone_mod.ini'))
+    $camera = [regex]::Match($defaults, '(?ms)^\[camera\][^\r\n]*\r?\n.*?(?=^\[|\z)')
+    if (-not $camera.Success) { Fail 'The package default settings have no [camera] section; nothing was installed.' }
+    $eol = if ($ini -match '\r\n') { "`r`n" } else { "`n" }
+    $block = ($camera.Value -replace '\r?\n', $eol).TrimEnd("`r", "`n") + $eol
+    $ini = $ini + $(if ($ini.Length -and -not $ini.EndsWith("`n")) { $eol } else { '' }) + $block
+}
+# Identical owner INIs are copied as bytes. A changed owner INI keeps its own encoding and byte-order mark.
+$iniEncoding = [Text.UTF8Encoding]::new($false)
+if ($null -ne $existing) {
+    $head = [IO.File]::ReadAllBytes($destIni)
+    if ($head.Length -ge 2 -and $head[0] -eq 0xFF -and $head[1] -eq 0xFE) { $iniEncoding = [Text.UnicodeEncoding]::new($false, $true) }
+    elseif ($head.Length -ge 2 -and $head[0] -eq 0xFE -and $head[1] -eq 0xFF) { $iniEncoding = [Text.UnicodeEncoding]::new($true, $true) }
+    elseif ($head.Length -ge 3 -and $head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF) { $iniEncoding = [Text.UTF8Encoding]::new($true) }
+}
+$iniBytes = if ($null -ne $existing -and $ini -ceq $existing) { [IO.File]::ReadAllBytes($destIni) } else { [byte[]]($iniEncoding.GetPreamble() + $iniEncoding.GetBytes($ini)) }
 $entries = @(
     [pscustomobject]@{ Path=$destDll; Bytes=[IO.File]::ReadAllBytes($dll) }
     [pscustomobject]@{ Path=$destIni; Bytes=$iniBytes }

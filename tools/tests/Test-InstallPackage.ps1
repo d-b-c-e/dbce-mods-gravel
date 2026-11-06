@@ -175,7 +175,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $game 'gravel-Win64-Shipping.exe'), 'inert fixture: never execute')
     [IO.File]::WriteAllText($wheel, $profile)
     $ini = Join-Path $game 'milestone_mod.ini'
-    $custom = "[proxy]`r`nproduct=0006346e`r`n[telemetry]`r`nenabled=0`r`nhost=192.0.2.25`r`nport=8000`r`nformat=custom-owner`r`n[custom]`r`nkeep=yes`r`n"
+    $custom = "[proxy]`r`nproduct=0006346e`r`n[telemetry]`r`nenabled=0`r`nhost=192.0.2.25`r`nport=8000`r`nformat=custom-owner`r`n[custom]`r`nkeep=yes`r`n[camera]`r`nfov_offset_deg=3`r`n"
     [IO.File]::WriteAllText($ini, $custom, [Text.Encoding]::Unicode)
     $iniHash = Get-ByteHash ([IO.File]::ReadAllBytes($ini))
     $wheelHash = Get-ByteHash ([IO.File]::ReadAllBytes($wheel))
@@ -266,6 +266,22 @@ try {
     $receipt = [IO.File]::ReadAllText((Join-Path $game 'milestone_install.json')) | ConvertFrom-Json
     Assert ($receipt.GameRoot -eq $gameRoot) 'Canonical game layout was resolved incorrectly.'
     foreach ($item in $receipt.OwnedFiles) { Assert ((Get-ByteHash ([IO.File]::ReadAllBytes($item.Path))) -eq $item.Hash) "Installed receipt mismatch: $($item.Path)" }
+    # Settings from before the camera keys gain the package [camera] block once; their own bytes, CRLF and UTF-16 BOM stay.
+    $withCamera=[IO.File]::ReadAllBytes($ini)
+    $legacy="[proxy]`r`nproduct=0006346e`r`n[triple]`r`nmode=auto`r`n"
+    [IO.File]::WriteAllText($ini,$legacy,[Text.Encoding]::Unicode)
+    $legacyBytes=[IO.File]::ReadAllBytes($ini)
+    $planned=& (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check
+    Assert (($planned.Files | Where-Object Path -EQ $ini).Action -ceq 'Replace') 'Missing [camera] plan did not report the added section.'
+    Assert ([Linq.Enumerable]::SequenceEqual([byte[]][IO.File]::ReadAllBytes($ini),[byte[]]$legacyBytes)) 'Missing [camera] plan wrote the INI.'
+    & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game
+    $afterCamera=[IO.File]::ReadAllBytes($ini)
+    Assert ($afterCamera.Length -gt $legacyBytes.Length -and [Linq.Enumerable]::SequenceEqual([byte[]]$afterCamera[0..($legacyBytes.Length-1)],[byte[]]$legacyBytes)) 'Missing [camera] update changed existing bytes or BOM.'
+    $cameraText=[IO.File]::ReadAllText($ini)
+    Assert ($cameraText.StartsWith($legacy) -and $cameraText -match '(?m)^\[camera\]\r$' -and $cameraText -match '(?m)^fov_offset_realistic_deg=0\r$' -and $cameraText -notmatch '(?<!\r)\n') 'Added [camera] block lacks the defaults or the file line endings.'
+    & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game
+    Assert ([Linq.Enumerable]::SequenceEqual([byte[]][IO.File]::ReadAllBytes($ini),[byte[]]$afterCamera)) 'A second update added [camera] again.'
+    [IO.File]::WriteAllBytes($ini,$withCamera)
     $receiptPath = Join-Path $game 'milestone_install.json'
     $receiptBytes = [IO.File]::ReadAllBytes($receiptPath)
     $before=Snapshot $gameRoot
