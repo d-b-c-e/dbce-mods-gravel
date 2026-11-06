@@ -67,6 +67,19 @@ stretched flat side screens. Cleanup was the integrated forced stop and byte-exa
 `build/live-03/case03/live/go-571267` in the release worktree. Limits: snapshot frames, position/tilt reset unasserted,
 no wheel-feel or FFB claim, telemetry off during the run.
 
+## Live stage 4 (camera cycle, `build/live-04/case02`, plan `1109CE23`): not yet observed
+
+- GO572877: route reached the race; one SwitchCamera press changed the in-car view to the bumper view; `probe_camera`
+  saturated at 128 candidates on MovieScene objects, so it cannot name the active camera. The runner then stopped on my
+  F7 answer, whose view text contained a refused token even though negated. Operator lesson: never use the refused view
+  words (cockpit, in-car, interior, dash, driver, helmet, first-person) in answers, negated or not.
+- GO573425 (same sealed case, corrected wording): INCONCLUSIVE, operator-side. nav-1 Confirm worked; the nav-2 answer
+  arrived 56 s after its deadline because the operator session's context was compacted mid-run. With no answer, nothing
+  was pressed; integrated forced stop, 183/183 byte-exact restore, natural `remotecache.vdf` change archived, Finalize pass.
+  Start the next attempt with fresh operator context.
+- Identity: the next source packet (kole-approved) follows PlayerController -> PlayerCameraManager (`+0x428`) ->
+  ViewTarget/CameraCache instead of scanning candidates.
+
 ## Live stage 3 result (2026-11-06, GO570432): offline route proven, camera phase not reached
 
 Packet `build/live-03/case02` (operator-chosen sealed navigation). Eight in-process presses, all accepted/down/ended with

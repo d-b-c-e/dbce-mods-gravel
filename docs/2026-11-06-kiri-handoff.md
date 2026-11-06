@@ -50,6 +50,8 @@ folders. Keep the worktree until reviewers close their audits; then move `build/
 ## Next
 
 1. Owner check (checklist section 12); optional: set `eye_distance_mm=660` with the owner's consent.
-2. Per-mounted-camera sets: run `probe_camera` in a race (the stage-3 route reaches one) and resolve camera identity.
+2. Per-mounted-camera sets: `probe_camera` saturates in a race (stage 4, smoke plan); next is the approved source packet
+   that follows PlayerController -> PlayerCameraManager `+0x428` -> ViewTarget/CameraCache, then rerun stage 4
+   (`build/live-04/case02`) under a fresh GO.
 3. Curve (curved renderer) remains unstarted work (`2026-11-01-pre-slate-trace.md`).
 4. Live packets should persist Steam log offsets (stage 3 recipe does) and keep the integrated forced-stop cleanup.
