@@ -83,7 +83,8 @@ struct Scene {
 // A well-formed race: one controller (plus its CDO), a Blueprint camera manager with an index and a weak view target,
 // a car with a root and two cameras, and finite POVs. Options let each test break one thing.
 struct Opt { bool noPc = false, twoPc = false, dupFov = false, pcmAsInt = false, locOutside = false, smallPov = false,
-             managerIsCar = false, managerBogus = false, nullTarget = false; int extraFields = 0, cams = 2; };
+             managerIsCar = false, managerBogus = false, nullTarget = false, splitMvi = false, foreignTarget = false,
+             noMvi = false; int extraFields = 0, cams = 2; };
 Scene build(World &w, const Opt &o = {})
 {
     W = &w; T.clear();
@@ -103,17 +104,21 @@ Scene build(World &w, const Opt &o = {})
     BYTE *cIgnition = klass("IgnitionCameraManager", s.cPcm, 0x710);
     s.cGravel = klass("GravelCameraManager_C", cIgnition, 0x780);
     s.cCar = klass("Car", s.cActor, 0x400);
-    s.cTvt = strct("TViewTarget", 0x60); s.cCce = strct("CameraCacheEntry", 0x60); s.cMvi = strct("MinimalViewInfo", 0x40);
+    s.cTvt = strct("TViewTarget", 0x60); s.cCce = strct("CameraCacheEntry", 0x60);
+    s.cMvi = strct(o.noMvi ? "MinimalViewInfoX" : "MinimalViewInfo", 0x40);
+    // A second, same-named struct holding one of the members, and a same-named owner of the wrong kind.
+    BYTE *mviTwin = o.splitMvi ? strct("MinimalViewInfo", 0x40) : nullptr;
+    BYTE *foreign = o.foreignTarget ? klass("TViewTarget", cObject, 0x60) : nullptr;
 
     prop("PlayerCameraManager", o.pcmAsInt ? "IntProperty" : "ObjectProperty", s.cPc, 0x428, o.pcmAsInt ? 4 : 8);
     prop("ViewTarget", "StructProperty", s.cPcm, 0x100, 0x60);
     prop("CameraCache", "StructProperty", s.cPcm, 0x200, 0x60);
-    prop("Target", "ObjectProperty", s.cTvt, 0, 8);
+    prop("Target", "ObjectProperty", foreign ? foreign : s.cTvt, 0, 8);
     prop("POV", "StructProperty", s.cTvt, 0x10, o.smallPov ? 0x10 : 0x40);
     prop("POV", "StructProperty", s.cCce, 0x10, 0x40);
     prop("Location", "StructProperty", s.cMvi, o.locOutside ? 0x3C : 0, 12);
     prop("Rotation", "StructProperty", s.cMvi, 0xC, 12);
-    prop("FOV", "FloatProperty", s.cMvi, 0x18, 4);
+    prop("FOV", "FloatProperty", mviTwin ? mviTwin : s.cMvi, 0x18, 4);
     if (o.dupFov) prop("FOV", "FloatProperty", s.cMvi, 0x1C, 4);
     prop("RootComponent", "ObjectProperty", s.cActor, 0x60, 8);
     prop("RelativeLocation", "StructProperty", s.cScene, 0x80, 12);
@@ -179,6 +184,12 @@ int main()
     { World w; Opt o; o.pcmAsInt = true; build(w, o); terminal("layout-refused"); check(has("PlayerController.PlayerCameraManager: unexpected type"), "wrong type refused"); }
     { World w; Opt o; o.locOutside = true; build(w, o); terminal("layout-refused"); check(has("MinimalViewInfo.Location: outside owner"), "member past owner size refused"); }
     { World w; Opt o; o.smallPov = true; build(w, o); terminal("layout-refused"); check(has("nested member does not fit"), "nested bounds refused"); }
+    { World w; Opt o; o.splitMvi = true; build(w, o); terminal("owner-unresolved");
+      check(has("owner ScriptStruct MinimalViewInfo: ambiguous"), "members split across same-named structs refused"); }
+    { World w; Opt o; o.foreignTarget = true; build(w, o); terminal("layout-refused");
+      check(has("TViewTarget.Target: missing"), "member of a same-named owner of another kind is not bound"); }
+    { World w; Opt o; o.noMvi = true; build(w, o); terminal("owner-unresolved");
+      check(has("owner ScriptStruct MinimalViewInfo: missing"), "missing owner refused"); }
     { World w; Opt o; o.managerIsCar = true; build(w, o); terminal("manager-unavailable"); check(has("unexpected class Car"), "manager class checked"); }
     { World w; Opt o; o.managerBogus = true; build(w, o); terminal("manager-unavailable"); check(has("not a live object"), "unreadable pointer is unavailable, not null"); }
     { World w; Opt o; o.nullTarget = true; build(w, o); terminal("target-unavailable"); check(has("ViewTarget.Target none"), "null target reported as none"); }

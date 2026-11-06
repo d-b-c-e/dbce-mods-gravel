@@ -317,8 +317,9 @@ bool g_propsResolved = false;
 // candidate -> PlayerCameraManager -> ViewTarget and CameraCache. It logs raw reflected values and derives nothing.
 // Limits, printed with the output: one live PlayerController is a candidate, not a proven local player; CameraCache is a
 // sampled cache, not proof of the rendered frame; Relative* values are relative to an attachment that is not checked.
-// Every reflected member must match exactly one declaration of the expected type and size that fits inside its owner
-// (and inside the containing struct for nested members), or the probe refuses. Reads that fail are reported as
+// Every declaring class/struct must resolve to exactly one object of its kind, and every reflected member must be
+// exactly one declaration bound to that owner by Outer pointer, of the expected type and size, that fits inside the
+// owner (and inside the containing struct for nested members), or the probe refuses. Reads that fail are reported as
 // unavailable, never as zero or null. Output format v2; every path ends with exactly one "v2 done status=" line.
 const int PROBE_FIELD_CAP = 64, PROBE_COMPONENT_CAP = 16;
 
@@ -333,40 +334,47 @@ bool member(const std::vector<BYTE *> &objs, BYTE *o)
 }
 
 struct RProp { int offset = -1, size = 0; const char *why = "unresolved"; bool ok() const { return offset >= 0; } };
-struct ProbeIndex { std::vector<std::pair<std::string, BYTE *>> classes, props; };
-const char *const kProbeClasses[] = {"PlayerController", "PlayerCameraManager", "Actor", "SceneComponent", "CameraComponent"};
+struct ProbeIndex { std::vector<std::pair<std::string, BYTE *>> owners, props; };
+// Every declaring owner, with the kind (UClass or UScriptStruct) its object must be. Each must resolve to exactly one
+// object, and members are then bound to that owner by Outer pointer, never by name.
+const struct { const char *name, *kind; } kProbeOwners[] = {
+    {"PlayerController", "Class"}, {"PlayerCameraManager", "Class"}, {"Actor", "Class"}, {"SceneComponent", "Class"},
+    {"CameraComponent", "Class"}, {"TViewTarget", "ScriptStruct"}, {"CameraCacheEntry", "ScriptStruct"},
+    {"MinimalViewInfo", "ScriptStruct"}};
 const char *const kProbeProps[] = {"PlayerCameraManager", "ViewTarget", "CameraCache", "Target", "POV", "Location",
                                    "Rotation", "FOV", "RootComponent", "RelativeLocation", "RelativeRotation", "FieldOfView"};
-// One pass over the snapshot collects every class and property the probe could need.
+// One pass over the snapshot collects every owner and property the probe could need.
 ProbeIndex indexFor(const std::vector<BYTE *> &objs)
 {
     ProbeIndex x;
     for (BYTE *o : objs) {
         if (!o) continue;
         const std::string n = objName(o);
-        bool cls = false, prop = false;
-        for (const char *w : kProbeClasses) cls = cls || n == w;
+        const char *kind = nullptr; bool prop = false;
+        for (auto &w : kProbeOwners) if (n == w.name) kind = w.kind;
         for (const char *w : kProbeProps) prop = prop || n == w;
-        if (!cls && !prop) continue;
+        if (!kind && !prop) continue;
         const std::string c = objName(objClass(o));
-        if (cls && c == "Class") x.classes.push_back({n, o});
+        if (kind && c == kind) x.owners.push_back({n, o});
         if (prop && isPropertyClass(c)) x.props.push_back({n, o});
     }
     return x;
 }
-BYTE *uniqueClass(const ProbeIndex &x, const char *name)
+// nullptr with why = "missing" or "ambiguous" unless exactly one owner of that name and kind exists.
+BYTE *uniqueOwner(const ProbeIndex &x, const char *name, const char *&why)
 {
     BYTE *found = nullptr; int n = 0;
-    for (auto &c : x.classes) if (c.first == name) { found = c.second; ++n; }
+    for (auto &c : x.owners) if (c.first == name) { found = c.second; ++n; }
+    why = !n ? "missing" : n > 1 ? "ambiguous" : "ok";
     return n == 1 ? found : nullptr;
 }
 // size 0 = any positive size (structs); otherwise the element size must match exactly.
-RProp reflect(const ProbeIndex &x, const char *name, const char *owner, const char *type, int size)
+RProp reflect(const ProbeIndex &x, const char *name, BYTE *owner, const char *type, int size)
 {
     RProp r; BYTE *hit = nullptr; int n = 0;
     for (auto &p : x.props) {
         BYTE *outer;
-        if (p.first != name || !rd(p.second + O_OUTER, outer) || objName(outer) != owner) continue;
+        if (p.first != name || !rd(p.second + O_OUTER, outer) || outer != owner) continue;
         hit = p.second; ++n;
     }
     if (!n) { r.why = "missing"; return r; }
@@ -470,28 +478,35 @@ const char *probeBody(int &fields, bool &fieldsCut, int &comps, bool &compsCut)
     if (!g_pOffset) return "no-offset-slot";
     const std::vector<BYTE *> objs = snapshot();
     const ProbeIndex x = indexFor(objs);
-    BYTE *cPc = uniqueClass(x, "PlayerController"), *cPcm = uniqueClass(x, "PlayerCameraManager"),
-         *cActor = uniqueClass(x, "Actor"), *cScene = uniqueClass(x, "SceneComponent"), *cCam = uniqueClass(x, "CameraComponent");
-    if (!cPc || !cPcm || !cActor || !cScene || !cCam) return "class-unresolved";
+    BYTE *owner[sizeof kProbeOwners / sizeof kProbeOwners[0]];
+    bool owned = true;
+    for (size_t i = 0; i < sizeof kProbeOwners / sizeof kProbeOwners[0]; ++i) {
+        const char *why;
+        owner[i] = uniqueOwner(x, kProbeOwners[i].name, why);
+        if (!owner[i]) { logf("[camera-probe] owner %s %s: %s", kProbeOwners[i].kind, kProbeOwners[i].name, why); owned = false; }
+    }
+    if (!owned) return "owner-unresolved";
+    BYTE *cPc = owner[0], *cPcm = owner[1], *cActor = owner[2], *cScene = owner[3], *cCam = owner[4],
+         *sTvt = owner[5], *sCce = owner[6], *sMvi = owner[7];
     std::vector<BYTE *> pcs;
     for (BYTE *o : objs) if (member(objs, o) && isA(objClass(o), cPc)) pcs.push_back(o);
     for (size_t i = 0; i < pcs.size() && i < 8; ++i) logf("[camera-probe] controller candidate %s", label(pcs[i]).c_str());
     if (pcs.empty()) return "no-controller";
     if (pcs.size() > 1) return "ambiguous-controller";
 
-    const RProp pPcm = reflect(x, "PlayerCameraManager", "PlayerController", "ObjectProperty", 8),
-                pVt = reflect(x, "ViewTarget", "PlayerCameraManager", "StructProperty", 0),
-                pCache = reflect(x, "CameraCache", "PlayerCameraManager", "StructProperty", 0),
-                pTarget = reflect(x, "Target", "TViewTarget", "ObjectProperty", 8),
-                pVtPov = reflect(x, "POV", "TViewTarget", "StructProperty", 0),
-                pCachePov = reflect(x, "POV", "CameraCacheEntry", "StructProperty", 0),
-                pLoc = reflect(x, "Location", "MinimalViewInfo", "StructProperty", 12),
-                pRot = reflect(x, "Rotation", "MinimalViewInfo", "StructProperty", 12),
-                pFov = reflect(x, "FOV", "MinimalViewInfo", "FloatProperty", 4),
-                pRoot = reflect(x, "RootComponent", "Actor", "ObjectProperty", 8),
-                pRelLoc = reflect(x, "RelativeLocation", "SceneComponent", "StructProperty", 12),
-                pRelRot = reflect(x, "RelativeRotation", "SceneComponent", "StructProperty", 12),
-                pCamFov = reflect(x, "FieldOfView", "CameraComponent", "FloatProperty", 4);
+    const RProp pPcm = reflect(x, "PlayerCameraManager", cPc, "ObjectProperty", 8),
+                pVt = reflect(x, "ViewTarget", cPcm, "StructProperty", 0),
+                pCache = reflect(x, "CameraCache", cPcm, "StructProperty", 0),
+                pTarget = reflect(x, "Target", sTvt, "ObjectProperty", 8),
+                pVtPov = reflect(x, "POV", sTvt, "StructProperty", 0),
+                pCachePov = reflect(x, "POV", sCce, "StructProperty", 0),
+                pLoc = reflect(x, "Location", sMvi, "StructProperty", 12),
+                pRot = reflect(x, "Rotation", sMvi, "StructProperty", 12),
+                pFov = reflect(x, "FOV", sMvi, "FloatProperty", 4),
+                pRoot = reflect(x, "RootComponent", cActor, "ObjectProperty", 8),
+                pRelLoc = reflect(x, "RelativeLocation", cScene, "StructProperty", 12),
+                pRelRot = reflect(x, "RelativeRotation", cScene, "StructProperty", 12),
+                pCamFov = reflect(x, "FieldOfView", cCam, "FloatProperty", 4);
     const struct { const char *name; const RProp &p; } layout[] = {
         {"PlayerController.PlayerCameraManager", pPcm}, {"PlayerCameraManager.ViewTarget", pVt},
         {"PlayerCameraManager.CameraCache", pCache}, {"TViewTarget.Target", pTarget}, {"TViewTarget.POV", pVtPov},
