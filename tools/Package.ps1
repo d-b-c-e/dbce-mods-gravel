@@ -9,7 +9,14 @@ if ($LASTEXITCODE) { throw 'Source commit could not be read.' }
 $sourceState = @(& git -C $root status --porcelain --untracked-files=no)
 if ($LASTEXITCODE) { throw 'Packaging source state could not be read.' }
 if ($sourceState.Count) { throw 'Commit the built binaries and source before packaging.' }
-$provenance = Read-RetainedBinaryProvenance $root
+$provenance = Read-BinaryProvenance $root
+if ($provenance.Kind -ceq 'observed-build') {
+    & git -C $root merge-base --is-ancestor $provenance.BuildReceipt.SourceCommit $source
+    if ($LASTEXITCODE) { throw 'Observed build commit is not in the packaging history; packaging refused.' }
+    $buildInputs = @(& git -C $root ls-files -- @(Get-BuildInputPathspec))
+    if ($LASTEXITCODE) { throw 'Native build inputs could not be enumerated.' }
+    Assert-ObservedBuildSource $root $provenance $buildInputs
+}
 $name = "milestone-wheel-tools-$version-$($source.Substring(0,8))"
 $destination = Join-Path $OutputRoot $name
 if (Test-Path -LiteralPath $destination) { throw "Package already exists: $destination" }
@@ -35,5 +42,9 @@ if ($LASTEXITCODE -or $finalState.Count) { throw 'Packaging source state changed
 $zip = "$destination.zip"
 Compress-Archive -Path (Join-Path $destination '*') -DestinationPath $zip -CompressionLevel Optimal
 Write-Output $destination
-Write-Output "Packaging source: $source; retained binaries: $($provenance.HistoricalSourceEvidenceCommit); compiler/build receipt unknown."
+if ($provenance.Kind -ceq 'observed-build') {
+    Write-Output "Packaging source: $source; observed clean build of $($provenance.BuildReceipt.SourceCommit); reproducibility not tested."
+} else {
+    Write-Output "Packaging source: $source; retained binaries: $($provenance.HistoricalSourceEvidenceCommit); compiler/build receipt unknown."
+}
 Get-FileHash -LiteralPath $zip -Algorithm SHA256

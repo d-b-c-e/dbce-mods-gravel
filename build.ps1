@@ -9,7 +9,8 @@ $sourceCommit = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE) { throw 'Build source commit could not be read.' }
 $sourceState = @(& git -C $root status --porcelain --untracked-files=all)
 if ($LASTEXITCODE) { throw 'Build source state could not be read.' }
-$inputPaths = @(& git -C $root ls-files -- src tools/wheelprobe lib/toolkit/include build.ps1 tools/BinaryProvenance.psm1)
+if ($UpdateDist -and $sourceState.Count) { throw 'Commit source before -UpdateDist; dist provenance is written only for a clean observed build.' }
+$inputPaths = @(& git -C $root ls-files -- @(Get-BuildInputPathspec))
 if ($LASTEXITCODE) { throw 'Build inputs could not be enumerated.' }
 $inputHashes = @($inputPaths | ForEach-Object { [pscustomobject]@{Path=$_;SHA256=(Get-ProvenanceHash (Join-Path $root $_))} })
 $compilerVersion = (& $compiler --version | Out-String).Trim()
@@ -49,6 +50,7 @@ try {
     Write-ValidatedBuildReceipt -Root $root -SourceCommit $sourceCommit -SourceDirty ($sourceState.Count -gt 0) -Compiler $compilerIdentity -Inspector $inspectorIdentity -InputHashes $inputHashes
     if ($UpdateDist) {
         foreach ($binary in 'dinput8.dll','wheelprobe.exe') { Copy-Item -LiteralPath (Join-Path $build $binary) -Destination (Join-Path $root "dist\$binary") -Force }
+        $null = New-ObservedBinaryProvenance $root
     }
     Get-FileHash (Join-Path $build 'dinput8.dll'),(Join-Path $build 'wheelprobe.exe')
 } finally { Pop-Location; $env:PATH = $previousPath }

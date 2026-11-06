@@ -4,6 +4,25 @@ function Get-ProvenanceHash([string]$Path) {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+# One definition of the native build inputs, shared by build.ps1 (receipt) and
+# Package.ps1 (proof that the packaged source still matches an observed build).
+function Get-BuildInputPathspec { @('src','tools/wheelprobe','lib/toolkit/include','build.ps1','tools/BinaryProvenance.psm1') }
+
+function Read-BinaryProvenance([string]$Root) {
+    $path = Join-Path $Root 'dist/binary-provenance.json'
+    if (-not [IO.File]::Exists($path)) { throw 'Binary provenance is missing; packaging refused.' }
+    $text = [Text.UTF8Encoding]::new($false,$true).GetString([IO.File]::ReadAllBytes($path))
+    $provenance = $text | ConvertFrom-Json
+    Assert-BinaryProvenance $Root $provenance
+    return $provenance
+}
+
+function Assert-BinaryProvenance([string]$Root, [object]$Provenance) {
+    if ($null -ne $Provenance -and $Provenance.PSObject.Properties['Kind'] -and $Provenance.Kind -ceq 'observed-build') {
+        Assert-ObservedBinaryProvenance $Root $Provenance
+    } else { Assert-RetainedBinaryProvenance $Root $Provenance }
+}
+
 function Read-RetainedBinaryProvenance([string]$Root) {
     $path = Join-Path $Root 'dist/binary-provenance.json'
     if (-not [IO.File]::Exists($path)) { throw 'Binary provenance is missing; packaging refused.' }
@@ -43,11 +62,92 @@ function Assert-RetainedBinaryProvenance([string]$Root, [object]$Provenance) {
     }
 }
 
+function Test-ExactFields([object]$Value, [string[]]$Fields) {
+    $null -ne $Value -and $Value -is [pscustomobject] -and -not @(Compare-Object @($Value.PSObject.Properties.Name) $Fields).Count
+}
+
+function Assert-ObservedBinaryProvenance([string]$Root, [object]$Provenance) {
+    # An observed build is adopted only from build.ps1's own receipt of a clean
+    # commit. The receipt is embedded whole; nothing is inferred or relabelled.
+    if (-not (Test-ExactFields $Provenance @('SchemaVersion','Kind','Evidence','BuildReceipt','Reproducibility','Binaries'))) { throw 'Observed provenance schema fields are invalid.' }
+    if ($Provenance.SchemaVersion -ne 2 -or $Provenance.Kind -cne 'observed-build' -or $Provenance.Reproducibility -cne 'not tested' -or
+        $Provenance.Evidence -isnot [string] -or -not $Provenance.Evidence.Trim()) { throw 'Observed provenance identity/claims are invalid.' }
+    $receipt = $Provenance.BuildReceipt
+    if (-not (Test-ExactFields $receipt @('SchemaVersion','Kind','SourceCommit','SourceDirty','CreatedUtc','Compiler','Inspector','SourceInputs','Binaries','Checks','Reproducibility','PackageAdoption'))) { throw 'Embedded build receipt fields are invalid.' }
+    if ($receipt.SchemaVersion -ne 1 -or $receipt.Kind -cne 'observed-build' -or $receipt.SourceCommit -cnotmatch '^[a-f0-9]{40}$' -or
+        $receipt.SourceDirty -isnot [bool] -or $receipt.SourceDirty -or $receipt.Reproducibility -cne 'not tested' -or
+        $receipt.PackageAdoption -cne 'requires independent provenance review' -or
+        (@($receipt.Checks) -join '|') -cne 'x64 PE|six proxy exports|no unbundled compiler-runtime imports') { throw 'Embedded build receipt is not a clean observed build.' }
+    foreach ($tool in $receipt.Compiler,$receipt.Inspector) {
+        if (-not (Test-ExactFields $tool @('Version','SHA256')) -or $tool.Version -isnot [string] -or -not $tool.Version.Trim() -or
+            $tool.SHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Embedded build tool identity is incomplete.' }
+    }
+    $inputs = @($receipt.SourceInputs)
+    if (-not $inputs.Count) { throw 'Embedded build receipt has no source inputs.' }
+    $seen = @{}
+    foreach ($item in $inputs) {
+        if (-not (Test-ExactFields $item @('Path','SHA256')) -or $item.SHA256 -cnotmatch '^[a-f0-9]{64}$' -or $item.Path -isnot [string] -or
+            $item.Path -cnotmatch '^[A-Za-z0-9_.\-]+(/[A-Za-z0-9_.\-]+)*$' -or $item.Path -match '(^|/)\.\.?(/|$)' -or
+            $seen.ContainsKey($item.Path)) { throw 'Embedded build input entry is invalid.' }
+        $seen[$item.Path] = $true
+    }
+    $built = @{}
+    foreach ($item in @($receipt.Binaries)) {
+        if (-not (Test-ExactFields $item @('Path','SHA256')) -or $item.Path -cnotin @('build/dinput8.dll','build/wheelprobe.exe') -or
+            $built.ContainsKey($item.Path) -or $item.SHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Embedded build output entry is invalid.' }
+        $built[$item.Path] = $item.SHA256
+    }
+    if ($built.Count -ne 2) { throw 'Embedded build receipt must identify both build outputs.' }
+    $entries = @($Provenance.Binaries)
+    if ($entries.Count -ne 2) { throw 'Observed provenance must identify exactly both distributed binaries.' }
+    $dist = @{}
+    foreach ($item in $entries) {
+        if (-not (Test-ExactFields $item @('Path','SHA256')) -or $item.Path -cnotin @('dist/dinput8.dll','dist/wheelprobe.exe') -or
+            $dist.ContainsKey($item.Path)) { throw 'Unexpected or duplicate provenance path.' }
+        $dist[$item.Path] = $true
+        if ($item.SHA256 -cne $built['build/' + $item.Path.Substring(5)]) { throw 'Distributed binary is not the observed build output.' }
+        $path = Join-Path $Root $item.Path
+        if (-not [IO.File]::Exists($path) -or (Get-ProvenanceHash $path) -cne $item.SHA256) { throw "Observed binary bytes mismatch: $($item.Path)" }
+    }
+}
+
+function Assert-ObservedBuildSource([string]$Root, [object]$Provenance, [string[]]$TrackedInputs) {
+    # Package time only: the packaged commit's tracked native inputs must be the
+    # exact set and bytes the observed build compiled.
+    $recorded = @($Provenance.BuildReceipt.SourceInputs)
+    $tracked = @($TrackedInputs | ForEach-Object { $_.Replace('\','/') } | Sort-Object -Unique -CaseSensitive)
+    $expected = @($recorded | ForEach-Object { $_.Path } | Sort-Object -Unique -CaseSensitive)
+    if (-not $tracked.Count -or ($tracked -join "`n") -cne ($expected -join "`n")) { throw 'Native build inputs changed since the observed build; rebuild before packaging.' }
+    foreach ($item in $recorded) {
+        $path = Join-Path $Root $item.Path
+        if (-not [IO.File]::Exists($path) -or (Get-ProvenanceHash $path) -cne $item.SHA256) { throw "Native build input changed since the observed build: $($item.Path)" }
+    }
+}
+
+function New-ObservedBinaryProvenance([string]$Root) {
+    # build.ps1 -UpdateDist calls this after copying a clean build into dist/.
+    $receiptPath = Join-Path $Root 'build/build-receipt.json'
+    if (-not [IO.File]::Exists($receiptPath)) { throw 'Build receipt is missing; dist provenance not written.' }
+    $receipt = [Text.UTF8Encoding]::new($false,$true).GetString([IO.File]::ReadAllBytes($receiptPath)) | ConvertFrom-Json
+    $provenance = [pscustomobject]@{
+        SchemaVersion=2; Kind='observed-build'
+        Evidence='build.ps1 -UpdateDist receipt of the clean SourceCommit below; adopted by the reviewed commit of dist/ (docs/BINARY-PROVENANCE.md); no live qualification'
+        BuildReceipt=$receipt; Reproducibility='not tested'
+        Binaries=@(foreach ($name in 'dinput8.dll','wheelprobe.exe') { [pscustomobject]@{ Path="dist/$name"; SHA256=(Get-ProvenanceHash (Join-Path $Root "dist/$name")) } })
+    }
+    Assert-ObservedBinaryProvenance $Root $provenance
+    $target = Join-Path $Root 'dist/binary-provenance.json'
+    $temp = "$target.$([guid]::NewGuid().ToString('N')).tmp"
+    [IO.File]::WriteAllText($temp,($provenance | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
+    Move-Item -LiteralPath $temp -Destination $target -Force
+    return $provenance
+}
+
 function Assert-PackageBinaryProvenance([string]$Root, [object]$Manifest) {
     if ($null -eq $Manifest -or @(Compare-Object @($Manifest.PSObject.Properties.Name) @('Product','Version','SourceCommit','PackagingSourceCommit','BinaryProvenance','CreatedUtc','Files')).Count) { throw 'Package provenance schema fields are invalid.' }
     if ($Manifest.SourceCommit -notmatch '^[a-f0-9]{40}$' -or
         $Manifest.PackagingSourceCommit -cne $Manifest.SourceCommit) { throw 'Packaging-source identity is invalid.' }
-    Assert-RetainedBinaryProvenance $Root $Manifest.BinaryProvenance
+    Assert-BinaryProvenance $Root $Manifest.BinaryProvenance
     foreach ($binary in $Manifest.BinaryProvenance.Binaries) {
         $file = @($Manifest.Files | Where-Object Path -CEQ $binary.Path)
         if ($file.Count -ne 1 -or $file[0].SHA256 -cne $binary.SHA256) { throw 'Package file/provenance hashes disagree.' }
@@ -77,4 +177,4 @@ function Write-ValidatedBuildReceipt {
     [IO.File]::WriteAllText((Join-Path $Root 'build/build-receipt.json'),($receipt | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
 }
 
-Export-ModuleMember -Function Get-ProvenanceHash,Read-RetainedBinaryProvenance,Assert-RetainedBinaryProvenance,Assert-PackageBinaryProvenance,Write-ValidatedBuildReceipt
+Export-ModuleMember -Function Get-ProvenanceHash,Get-BuildInputPathspec,Read-BinaryProvenance,Assert-BinaryProvenance,Assert-ObservedBinaryProvenance,Assert-ObservedBuildSource,New-ObservedBinaryProvenance,Read-RetainedBinaryProvenance,Assert-RetainedBinaryProvenance,Assert-PackageBinaryProvenance,Write-ValidatedBuildReceipt
