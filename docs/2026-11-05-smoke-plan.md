@@ -59,6 +59,8 @@ R1 rows do not need focus. This is a separate delta that needs review in the run
    `pwsh E:\Source\dbce-project-mgmt\tools\Test-DesktopRoutes.ps1` and keep its JSON. Record the live
    `SPI_GETFOREGROUNDLOCKTIMEOUT` (read only; kole restored it to 200000 ms on 2026-11-06) in the receipt before and
    after the run. If it reads 2147483647 again, report the time and what ran just before to kole; never change it.
+   Schedule launch when the last input is at least 210 s old (record it): kole found on 2026-11-06 that the ordinary
+   focus request then succeeds, so the attach fallback is rarely needed.
 2. Census: no Gravel process and no pending Steam launch by any other agent. The November 1 run stalled on a foreign
    American Truck Simulator chooser, so ask kole to hold other Steam launches for this slot.
 3. Recheck the identity table above. Snapshot the Win64 folder, game Config, `LocalAppData/Gravel/Saved`,
