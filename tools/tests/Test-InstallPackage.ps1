@@ -281,6 +281,21 @@ try {
     Assert ($cameraText.StartsWith($legacy) -and $cameraText -match '(?m)^\[camera\]\r$' -and $cameraText -match '(?m)^fov_offset_realistic_deg=0\r$' -and $cameraText -notmatch '(?<!\r)\n') 'Added [camera] block lacks the defaults or the file line endings.'
     & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game
     Assert ([Linq.Enumerable]::SequenceEqual([byte[]][IO.File]::ReadAllBytes($ini),[byte[]]$afterCamera)) 'A second update added [camera] again.'
+    # Text that does not re-encode to its exact bytes (BOM-less Windows-1252 e9, UTF-32) is never rewritten: the update
+    # keeps every byte without [camera], and an explicit override is refused with no write.
+    $codePage=[byte[]](@(0x3B,0x20,0x63,0x61,0x66,0xE9,0x0D,0x0A)+[Text.Encoding]::ASCII.GetBytes("[proxy]`r`nproduct=0006346e`r`n[telemetry]`r`nport=5300`r`nformat=fh4`r`n"))
+    [IO.File]::WriteAllBytes($ini,$codePage)
+    $planned=& (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Check
+    Assert (($planned.Files | Where-Object Path -EQ $ini).Action -ceq 'Preserve') 'Lossy legacy INI plan did not report preservation.'
+    & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game
+    Assert ([Linq.Enumerable]::SequenceEqual([byte[]][IO.File]::ReadAllBytes($ini),[byte[]]$codePage)) 'Lossy legacy INI bytes were rewritten.'
+    $before=Snapshot $gameRoot
+    Reject { & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game -Port 9456 } 'Lossy legacy INI override was rewritten.' 'cannot rewrite'
+    Assert ((Snapshot $gameRoot) -ceq $before) 'Refused lossy override changed files.'
+    [IO.File]::WriteAllText($ini,$legacy,[Text.Encoding]::UTF32)
+    $utf32=[IO.File]::ReadAllBytes($ini)
+    & (Join-Path $PackageRoot 'Install.ps1') -GamePath $game
+    Assert ([Linq.Enumerable]::SequenceEqual([byte[]][IO.File]::ReadAllBytes($ini),[byte[]]$utf32)) 'UTF-32 INI was rewritten as another encoding.'
     [IO.File]::WriteAllBytes($ini,$withCamera)
     $receiptPath = Join-Path $game 'milestone_install.json'
     $receiptBytes = [IO.File]::ReadAllBytes($receiptPath)

@@ -86,23 +86,34 @@ $ini = if ($null -ne $existing) { $existing } else { [IO.File]::ReadAllText((Joi
 if ($null -eq $existing -or $PSBoundParameters.ContainsKey('Product')) { $ini = Set-ModSetting $ini 'proxy' 'product' $productKey }
 if ($null -eq $existing -or $PSBoundParameters.ContainsKey('Port')) { $ini = Set-ModSetting $ini 'telemetry' 'port' ([string]$Port) }
 if ($null -eq $existing -or $PSBoundParameters.ContainsKey('Format')) { $ini = Set-ModSetting $ini 'telemetry' 'format' $Format }
-# Settings from before the camera keys have no [camera] section, and the native writer never creates a section, so
-# numpad camera tuning could not be saved. Append the package defaults once; every existing line stays as it is.
-if ($null -ne $existing -and $ini -notmatch '(?m)^[ \t]*\[camera\]') {
-    $defaults = [IO.File]::ReadAllText((Join-Path $root 'games\gravel\milestone_mod.ini'))
-    $camera = [regex]::Match($defaults, '(?ms)^\[camera\][^\r\n]*\r?\n.*?(?=^\[|\z)')
-    if (-not $camera.Success) { Fail 'The package default settings have no [camera] section; nothing was installed.' }
-    $eol = if ($ini -match '\r\n') { "`r`n" } else { "`n" }
-    $block = ($camera.Value -replace '\r?\n', $eol).TrimEnd("`r", "`n") + $eol
-    $ini = $ini + $(if ($ini.Length -and -not $ini.EndsWith("`n")) { $eol } else { '' }) + $block
-}
-# Identical owner INIs are copied as bytes. A changed owner INI keeps its own encoding and byte-order mark.
+# Identical owner INIs are copied as bytes. A changed owner INI keeps its own encoding and byte-order mark, and is
+# changed only when re-encoding the text as read reproduces the original bytes exactly: a BOM-less legacy code page or
+# an encoding read differently (UTF-32) would otherwise be silently altered outside the edited lines.
 $iniEncoding = [Text.UTF8Encoding]::new($false)
+$iniRoundTrip = $true
 if ($null -ne $existing) {
     $head = [IO.File]::ReadAllBytes($destIni)
     if ($head.Length -ge 2 -and $head[0] -eq 0xFF -and $head[1] -eq 0xFE) { $iniEncoding = [Text.UnicodeEncoding]::new($false, $true) }
     elseif ($head.Length -ge 2 -and $head[0] -eq 0xFE -and $head[1] -eq 0xFF) { $iniEncoding = [Text.UnicodeEncoding]::new($true, $true) }
     elseif ($head.Length -ge 3 -and $head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF) { $iniEncoding = [Text.UTF8Encoding]::new($true) }
+    $iniRoundTrip = [Linq.Enumerable]::SequenceEqual([byte[]]($iniEncoding.GetPreamble() + $iniEncoding.GetBytes($existing)), [byte[]]$head)
+}
+if ($null -ne $existing -and $ini -cne $existing -and -not $iniRoundTrip) {
+    Fail 'The saved settings file uses an encoding this installer cannot rewrite without changing other bytes; nothing was installed. Run again without the setting option to keep the file as it is.'
+}
+# Settings from before the camera keys have no [camera] section, and the native writer never creates a section, so
+# numpad camera tuning could not be saved. Append the package defaults once; every existing line stays as it is.
+if ($null -ne $existing -and $ini -notmatch '(?m)^[ \t]*\[camera\]') {
+    if (-not $iniRoundTrip) {
+        Say 'Saved settings were kept exactly as they are. Their text encoding cannot be extended safely, so camera adjustments will not be saved until a [camera] section is added.'
+    } else {
+        $defaults = [IO.File]::ReadAllText((Join-Path $root 'games\gravel\milestone_mod.ini'))
+        $camera = [regex]::Match($defaults, '(?ms)^\[camera\][^\r\n]*\r?\n.*?(?=^\[|\z)')
+        if (-not $camera.Success) { Fail 'The package default settings have no [camera] section; nothing was installed.' }
+        $eol = if ($ini -match '\r\n') { "`r`n" } else { "`n" }
+        $block = ($camera.Value -replace '\r?\n', $eol).TrimEnd("`r", "`n") + $eol
+        $ini = $ini + $(if ($ini.Length -and -not $ini.EndsWith("`n")) { $eol } else { '' }) + $block
+    }
 }
 $iniBytes = if ($null -ne $existing -and $ini -ceq $existing) { [IO.File]::ReadAllBytes($destIni) } else { [byte[]]($iniEncoding.GetPreamble() + $iniEncoding.GetBytes($ini)) }
 $entries = @(
