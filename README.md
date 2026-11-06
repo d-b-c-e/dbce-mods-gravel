@@ -24,8 +24,10 @@ and its runtime qualification are still pending.
 
 Current qualification, installed identity, rollback and ordered next steps are in the
 [November 1 handoff](docs/2026-11-01-mevu-handoff.md). Native atomic camera saves and
-an opt-in camera probe are source work; the current Game/Realistic F7 design,
-curved presentation, in-game F6 and gameplay route playback remain unfinished.
+an opt-in camera probe are source work. In source (not yet built or installed), F7 switches the
+Game / Realistic field-of-view set for all cameras and Shift+F7 is a session-only developer
+comparison; per-mounted-camera sets, curved presentation, in-game F6 and gameplay route
+playback remain unfinished.
 The diagnostic DLL has not been promoted to a new supported package.
 
 ## First drive

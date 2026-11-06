@@ -1,6 +1,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 
@@ -9,6 +10,7 @@
 /* CAMERA_STEPS */
 int g_camLock = 0;
 CameraOffsets g_cam;
+std::atomic<bool> g_realistic{false};
 inline void fixtureAcquire(int*) {}
 inline void fixtureRelease(int*) {}
 #define AcquireSRWLockExclusive fixtureAcquire
@@ -34,6 +36,15 @@ int main() {
     applyCamera(reset, 1); check(g_cam.fov == 0, "reset still returns to the calculated start");
     applyCamera(action(VK_NUMPAD8), 1); check(g_cam.x == g_moveStep && g_cam.fov == 0, "position key is unchanged");
     check(action(VK_F6) == -1, "unrelated key stays unbound");
+    // Each Game / Realistic set keeps its own FOV offset; position and tilt are shared (STD-041/046).
+    g_cam = CameraOffsets{}; g_realistic = true; applyCamera(minus, 2);
+    check(g_cam.fovRealistic == 2 * g_fovStep && g_cam.fov == 0, "FOV keys tune only the Realistic set while it is active");
+    g_realistic = false; applyCamera(plus, 1);
+    check(g_cam.fov == -g_fovStep && g_cam.fovRealistic == 2 * g_fovStep, "Game set tune leaves the Realistic tune alone");
+    applyCamera(action(VK_NUMPAD8), 1); g_realistic = true; applyCamera(reset, 1);
+    check(g_cam.fovRealistic == 0 && g_cam.x == 0 && g_cam.fov == -g_fovStep, "reset returns the active set and position, other set keeps its tune");
+    applyCamera(minus, 100); check(g_cam.fovRealistic == 40, "Realistic offset is clamped like the Game offset");
+    g_realistic = false;
     std::printf("%d checks, %d failures; actual key dispatcher, no window/game/device calls\n", checks, failures);
     return failures ? 1 : 0;
 }

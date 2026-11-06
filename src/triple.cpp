@@ -75,10 +75,13 @@ void early(const char *fmt, ...)
 
 std::atomic<bool> g_active{false};
 Frustum g_panels[3]{};                        // 0 left, 1 centre, 2 right
-std::atomic<float> g_panelFov{-1};            // game FOV the panels were computed for
-std::atomic<double> g_eyeMm{0};               // effective eye of the last panels (log)
-// F7 "Original game view": the three thirds of one flat plane, so the centre stays the game's
-// view and the sides continue it flat (one wide image, no angle correction).
+std::atomic<double> g_eyeMm{0};               // eye distance the panels were built for
+// STD-041: F7 switches the Game / Realistic set (saved as [triple] fov=game|rig). Until the active camera can be
+// identified (handoff step 2) the set applies to every camera, not per mounted camera.
+std::atomic<bool> g_realistic{false};
+bool g_legacyOriginal = false;                // [triple] view=original from the superseded F7 (log only)
+// Shift+F7 developer comparison "Original game view": the three thirds of one flat plane, so the centre stays the
+// game's view and the sides continue it flat (no angle correction). Session only, never saved (STD-041).
 // shortcut: flat continuation, not the engine's own non-stereo wide view (unmeasured on Gravel); switch to stereo-off if the rig shows they differ.
 std::atomic<bool> g_original{false}, g_panelsFlat{false};   // chosen / last built
 SRWLOCK g_panelLock = SRWLOCK_INIT;
@@ -107,18 +110,28 @@ Frustum panel(V3 pa, V3 pb, V3 pc)
     return {std::atan2(fwd.x, fwd.z) * 180 / Pi, dot(vr, pa) / d, dot(vr, pb) / d, dot(vu, pa) / d, dot(vu, pc) / d};
 }
 
-// Eye distance: from the game's horizontal FOV on the centre panel (FovSource::Game), so
-// the centre shows what the game shows on one screen and the sides continue it at the
-// rig's panel angle; or from the rig (fixed eye distance / vertical FOV).
-void computePanels(float gameFov)
+// Seat-true vertical FOV of the measured rig: from the eye distance when set, else vertical_fov.
+double rigVerticalFov()
+{
+    return g_tc.eye > 0 ? 2 * std::atan(g_tc.panelH / 2 / g_tc.eye) * 180 / Pi : g_tc.vfov;
+}
+
+// Eye distance. Game set: from the game's horizontal FOV on the centre panel, so the centre shows what the game shows
+// on one screen and the sides continue it at the rig's panel angle. Realistic set: the rig's seat-true vertical FOV
+// plus that set's own saved offset; with no offset it is exactly the measured eye distance.
+double eyeFor(float gameFov, bool realistic, float rigOffset)
+{
+    const double w = g_tc.panelW, h = g_tc.panelH;
+    if (!realistic && gameFov > 5 && gameFov < 170) return w / 2 / std::tan(gameFov * Pi / 360);
+    if (rigOffset == 0 && g_tc.eye > 0) return g_tc.eye;
+    const double v = std::min(120.0, std::max(20.0, rigVerticalFov() + rigOffset));
+    return h / 2 / std::tan(v * Pi / 360);
+}
+
+void computePanels(double d)
 {
     const bool flat = g_original.load();
     const double w = g_tc.panelW, h = g_tc.panelH, a = flat ? 0 : g_tc.side * Pi / 180, bezel = flat ? 0 : g_tc.bezel;
-    double d;
-    if (g_tc.fov == FovSource::Game && gameFov > 5 && gameFov < 170)
-        d = w / 2 / std::tan(gameFov * Pi / 360);
-    else
-        d = g_tc.eye > 0 ? g_tc.eye : h / 2 / std::tan(g_tc.vfov * Pi / 360);
     V3 up{0, h, 0};
     Frustum p[3];
     p[1] = panel({-w / 2, -h / 2, d}, {w / 2, -h / 2, d}, {-w / 2, h / 2, d});
@@ -129,7 +142,6 @@ void computePanels(float gameFov)
     p[0] = panel(leftOuter, leftInner, leftOuter + up);
     AcquireSRWLockExclusive(&g_panelLock);
     for (int i = 0; i < 3; ++i) g_panels[i] = p[i];
-    g_panelFov = gameFov;
     g_eyeMm = d;
     g_panelsFlat = flat;
     ReleaseSRWLockExclusive(&g_panelLock);
@@ -165,8 +177,9 @@ bool inGameplay()
 // ------------------------------------------------------------- camera keys
 // STD-005/006: numpad 8/2 forward/back, 9/3 up/down, 4/6 left/right, 7/1 tilt down/up,
 // +/- FOV, 5 reset; steps 0.02 m, 1 deg, 2 deg ([camera] in milestone_mod.ini). Offsets move
-// the eye of all three views together, in a race only, and are saved in the INI.
-struct CameraOffsets { float x = 0, y = 0, z = 0, tilt = 0, fov = 0; };
+// the eye of all three views together, in a race only, and are saved in the INI. Each set keeps
+// its own FOV offset (fov = Game, fovRealistic = Realistic); position and tilt are shared.
+struct CameraOffsets { float x = 0, y = 0, z = 0, tilt = 0, fov = 0, fovRealistic = 0; };
 CameraOffsets g_cam;                        // read on the render path, written by cameraThread
 SRWLOCK g_camLock = SRWLOCK_INIT;
 float g_moveStep = 0.02f, g_tiltStep = 1.f, g_fovStep = 2.f;
@@ -259,8 +272,15 @@ FMatrixF *hookProjection(const void *self, FMatrixF *out, int pass, float fov)
     float nearZ = out->M[3][2];
     int p = panelOf(pass);
     if (p < 0) return out;
-    if (inGameplay()) fov = std::min(120.f, std::max(20.f, fov + cameraNow().fov));
-    if (std::fabs(fov - g_panelFov.load()) > 0.01f || g_panelsFlat.load() != g_original.load()) computePanels(fov);
+    const bool realistic = g_realistic.load();
+    float rigOffset = 0;
+    if (inGameplay()) {
+        const CameraOffsets c = cameraNow();
+        if (realistic) rigOffset = c.fovRealistic;
+        else fov = std::min(120.f, std::max(20.f, fov + c.fov));
+    }
+    const double d = eyeFor(fov, realistic, rigOffset);
+    if (std::fabs(d - g_eyeMm.load()) > 1e-3 || g_panelsFlat.load() != g_original.load()) computePanels(d);
     Frustum f = panelFor(p);
     FMatrixF m{};
     m.M[0][0] = (float)(2 / (f.r - f.l));
@@ -671,6 +691,8 @@ void applyCamera(int action, int count)
 {
     AcquireSRWLockExclusive(&g_camLock);
     CameraOffsets &c = g_cam;
+    const bool realistic = g_realistic.load();
+    float &fov = realistic ? c.fovRealistic : c.fov;   // FOV keys tune the active set only
     for (int i = 0; i < count; ++i) {
         switch (action) {
         case CamForward: c.x += g_moveStep; break;
@@ -681,13 +703,13 @@ void applyCamera(int action, int count)
         case CamRight: c.y += g_moveStep; break;
         case CamTiltDown: c.tilt += g_tiltStep; break;
         case CamTiltUp: c.tilt -= g_tiltStep; break;
-        case CamWider: c.fov += g_fovStep; break;
-        case CamNarrower: c.fov -= g_fovStep; break;
-        case CamReset: c = CameraOffsets{}; break;
+        case CamWider: fov += g_fovStep; break;
+        case CamNarrower: fov -= g_fovStep; break;
+        case CamReset: c.x = c.y = c.z = c.tilt = 0; fov = 0; break;   // the other set keeps its own tune
         }
     }
     c.x = std::max(-1.f, std::min(1.f, c.x)); c.y = std::max(-1.f, std::min(1.f, c.y)); c.z = std::max(-1.f, std::min(1.f, c.z));
-    c.tilt = std::max(-30.f, std::min(30.f, c.tilt)); c.fov = std::max(-40.f, std::min(40.f, c.fov));
+    c.tilt = std::max(-30.f, std::min(30.f, c.tilt)); fov = std::max(-40.f, std::min(40.f, fov));
     ReleaseSRWLockExclusive(&g_camLock);
 }
 
@@ -697,11 +719,12 @@ void saveCamera()
 {
     char ini[MAX_PATH]; sidecarPath(ini, "milestone_mod.ini");
     const CameraOffsets c = cameraNow();
-    char x[32], y[32], z[32], tilt[32], fov[32];
+    char x[32], y[32], z[32], tilt[32], fov[32], fovR[32];
     snprintf(x, sizeof x, "%.3f", c.x); snprintf(y, sizeof y, "%.3f", c.y); snprintf(z, sizeof z, "%.3f", c.z);
-    snprintf(tilt, sizeof tilt, "%.1f", c.tilt); snprintf(fov, sizeof fov, "%.1f", c.fov);
-    if (dbce::settings::save(ini, "camera", {{"forward_m", x}, {"right_m", y}, {"up_m", z}, {"tilt_down_deg", tilt}, {"fov_offset_deg", fov}}))
-        logf("[camera] saved forward %.2f right %.2f up %.2f m, tilt %.1f, fov %+.1f", c.x, c.y, c.z, c.tilt, c.fov);
+    snprintf(tilt, sizeof tilt, "%.1f", c.tilt); snprintf(fov, sizeof fov, "%.1f", c.fov); snprintf(fovR, sizeof fovR, "%.1f", c.fovRealistic);
+    if (dbce::settings::save(ini, "camera", {{"forward_m", x}, {"right_m", y}, {"up_m", z}, {"tilt_down_deg", tilt},
+                                             {"fov_offset_deg", fov}, {"fov_offset_realistic_deg", fovR}}))
+        logf("[camera] saved forward %.2f right %.2f up %.2f m, tilt %.1f, fov Game %+.1f Realistic %+.1f", c.x, c.y, c.z, c.tilt, c.fov, c.fovRealistic);
     else {
         logf("[camera] could not save offsets (error %lu); previous file kept", GetLastError());
         showNotice("Couldn't save camera settings");
@@ -715,12 +738,12 @@ bool gameInFront()
     return h && GetWindowThreadProcessId(h, &pid) && pid == GetCurrentProcessId();
 }
 
-// ------------------------------------------------------- F7 view comparison
-// Camera framing policy rev 3 (dbce-triple-screen-toolkit docs/camera-framing-and-comparison-policy.md): F7 in a race
-// steps Original game view / Angle correction (no curve renderer here, so two steps), names it for 2.5 s centred on
-// the centre screen and saves only [triple] view for the next start. The game has no overlay of ours, so the notice is
-// a topmost click-through window that never takes focus (triple layouts are always windowed, see hookSetFs). It is
-// owned and pumped by cameraThread.
+// ------------------------------------------------------- F7 field-of-view sets
+// STD-041/046: screens are always angle-corrected. F7 in a race switches the Game / Realistic set and saves only
+// [triple] fov; Shift+F7 is the developer comparison Original game view / Angle correction, session only, never saved
+// (no curve renderer here, so two steps). Each is named for 2.5 s centred on the centre screen. The game has no overlay
+// of ours, so the notice is a topmost click-through window that never takes focus (triple layouts are always windowed,
+// see hookSetFs). It is owned and pumped by cameraThread.
 HWND g_notice = nullptr;
 ULONGLONG g_noticeUntil = 0;
 
@@ -761,25 +784,59 @@ void showNotice(const char *text)
     g_noticeUntil = GetTickCount64() + 2500;
 }
 
-void viewKey()
+// The active set's name for notices: "Game FOV" or "Realistic FOV 34°", plus " (Custom)" when its FOV is tuned.
+void setLabel(char *out, size_t n)
+{
+    const CameraOffsets c = cameraNow();
+    if (!g_realistic.load()) { snprintf(out, n, "Game FOV%s", c.fov ? " (Custom)" : ""); return; }
+    const double v = std::min(120.0, std::max(20.0, rigVerticalFov() + c.fovRealistic));
+    snprintf(out, n, "Realistic FOV %.0f\xC2\xB0%s", v, c.fovRealistic ? " (Custom)" : "");
+}
+
+void setKey()
+{
+    char text[160];
+    if (!inGameplay()) {
+        snprintf(text, sizeof text, "Field-of-view sets switch while driving");
+        logf("[triple] F7 outside a race: no change, nothing saved");
+    } else {
+        const bool realistic = !g_realistic.load();
+        g_realistic = realistic;              // the render thread rebuilds the panels on its next projection
+        char ini[MAX_PATH]; sidecarPath(ini, "milestone_mod.ini");
+        const bool saved = dbce::settings::save(ini, "triple", {{"fov", realistic ? "rig" : "game"}});
+        const DWORD err = saved ? 0 : GetLastError();
+        char label[64]; setLabel(label, sizeof label);
+        snprintf(text, sizeof text, "%s  \xC2\xB7  F7 %s set  \xC2\xB7  Numpad + / - field of view%s", label,
+                 realistic ? "Game" : "Realistic", saved ? "" : " - Couldn't save");
+        logf("[triple] F7: %s set; rig vertical fov %.1f, curve none (no curved renderer)%s", realistic ? "Realistic" : "Game",
+             rigVerticalFov(), saved ? "; saved [triple] fov" : "");
+        if (!saved) logf("[triple] could not save [triple] fov (error %lu); the file keeps its previous choice", err);
+    }
+    showNotice(text);
+}
+
+// Shift+F7: developer comparison only; never written to the INI.
+void compareKey()
 {
     char text[128];
     if (!inGameplay()) {
-        snprintf(text, sizeof text, "View switching available while driving");
-        logf("[triple] F7 outside a race: no change, nothing saved");
+        snprintf(text, sizeof text, "View comparison available while driving");
+        logf("[triple] Shift+F7 outside a race: no change");
     } else {
         const bool original = !g_original.load();
-        g_original = original;                // the render thread rebuilds the panels on its next projection
-        char ini[MAX_PATH]; sidecarPath(ini, "milestone_mod.ini");
-        const bool saved = dbce::settings::save(ini, "triple", {{"view", original ? "original" : "angle"}});
-        const DWORD err = saved ? 0 : GetLastError();
-        const char *fail = saved ? "" : " - Couldn't save view";
-        if (original) snprintf(text, sizeof text, "Original game view (1 of 2)%s", fail);
-        else snprintf(text, sizeof text, "Angle correction - %s (2 of 2)%s", g_tc.fov == FovSource::Rig ? "Measured FOV" : "Game FOV", fail);
-        logf("[triple] F7: %s; framing %s, eye %.1f mm, curve none (no curved renderer)%s", text,
-             g_tc.fov == FovSource::Rig ? "rig" : "game", g_eyeMm.load(), saved ? "; saved [triple] view" : "");
-        if (!saved) logf("[triple] could not save [triple] view (error %lu); the file keeps its previous choice", err);
+        g_original = original;
+        snprintf(text, sizeof text, "Developer comparison: %s (not saved)", original ? "Original game view" : "Angle correction");
+        logf("[triple] Shift+F7: %s, session only, nothing saved", original ? "original game view" : "angle correction");
     }
+    showNotice(text);
+}
+
+// Numpad 5 returns the active set to its calculated start (STD-046); say so.
+void resetNotice()
+{
+    char label[64], text[128];
+    setLabel(label, sizeof label);
+    snprintf(text, sizeof text, "%s - camera reset to the calculated view", label);
     showNotice(text);
 }
 
@@ -795,14 +852,17 @@ DWORD WINAPI cameraThread(LPVOID)
         const ULONGLONG now = GetTickCount64();
         if (g_noticeUntil && now >= g_noticeUntil) { ShowWindow(g_notice, SW_HIDE); g_noticeUntil = 0; }
         const bool front = gameInFront(), f7 = front && (GetAsyncKeyState(VK_F7) & 0x8000);
-        if (f7 && !f7Was) viewKey();
+        if (f7 && !f7Was) {
+            if (GetAsyncKeyState(VK_SHIFT) & 0x8000) compareKey();
+            else setKey();
+        }
         f7Was = f7;
         bool changed = false;
         if (front && inGameplay()) {
             for (int a = 0; a < CamCount; ++a) {
                 const bool held = (GetAsyncKeyState(g_camKeys[a]) & 0x8000) != 0;
                 if (!held) { down[a] = 0; continue; }
-                if (!down[a]) { down[a] = now; applyCamera(a, 1); changed = true; }
+                if (!down[a]) { down[a] = now; applyCamera(a, 1); changed = true; if (a == CamReset) resetNotice(); }
                 else if (a != CamReset && now - down[a] > 400) { applyCamera(a, 1); changed = true; down[a] = now - 340; }
             }
         }
@@ -812,10 +872,15 @@ DWORD WINAPI cameraThread(LPVOID)
                 while (fgets(line, sizeof line, f)) {
                     char word[32] = ""; int count = 1;
                     if (sscanf(line, "%31s %d", word, &count) < 1) continue;
-                    if (!_stricmp(word, "view")) { logf("[camera] command view"); viewKey(); continue; }   // F7, for unattended tests
+                    // view = F7, compare = Shift+F7, for unattended tests
+                    if (!_stricmp(word, "view")) { logf("[camera] command view"); setKey(); continue; }
+                    if (!_stricmp(word, "compare")) { logf("[camera] command compare"); compareKey(); continue; }
                     if (!_stricmp(word, "probe_camera")) { ue4RequestCameraProbe(); continue; }
                     for (int a = 0; a < CamCount; ++a)
-                        if (!_stricmp(word, g_camNames[a])) { applyCamera(a, std::max(1, std::min(100, count))); changed = true; logf("[camera] command %s %d", word, count); }
+                        if (!_stricmp(word, g_camNames[a])) {
+                            applyCamera(a, std::max(1, std::min(100, count))); changed = true; logf("[camera] command %s %d", word, count);
+                            if (a == CamReset) resetNotice();
+                        }
                 }
                 fclose(f);
             }
@@ -835,8 +900,11 @@ void readTripleConfig()
     g_tc.mode = !_stricmp(v, "on") ? Mode::On : !_stricmp(v, "off") ? Mode::Off : Mode::Auto;
     GetPrivateProfileStringA("triple", "fov", "game", v, sizeof v, ini);
     g_tc.fov = !_stricmp(v, "rig") ? FovSource::Rig : FovSource::Game;
+    g_realistic = g_tc.fov == FovSource::Rig;
+    // A [triple] view=original saved by the superseded rev-3 F7 is no longer a player mode (STD-041): always start
+    // angle-corrected. The key is left as it is; only the start-up log mentions it.
     GetPrivateProfileStringA("triple", "view", "", v, sizeof v, ini);
-    g_original = !_stricmp(v, "original");   // missing or unrecognized: angle correction, as before; nothing written
+    g_legacyOriginal = !_stricmp(v, "original");
     auto num = [&](const char *key, double def) {
         char b[32] = ""; GetPrivateProfileStringA("triple", key, "", b, sizeof b, ini);
         return b[0] ? atof(b) : def;
@@ -859,7 +927,7 @@ void readTripleConfig()
     };
     g_moveStep = cam("move_step_m", 0.02); g_tiltStep = cam("tilt_step_deg", 1); g_fovStep = cam("fov_step_deg", 2);
     g_cam.x = cam("forward_m", 0); g_cam.y = cam("right_m", 0); g_cam.z = cam("up_m", 0);
-    g_cam.tilt = cam("tilt_down_deg", 0); g_cam.fov = cam("fov_offset_deg", 0);
+    g_cam.tilt = cam("tilt_down_deg", 0); g_cam.fov = cam("fov_offset_deg", 0); g_cam.fovRealistic = cam("fov_offset_realistic_deg", 0);
 }
 
 } // namespace
@@ -921,7 +989,7 @@ void tripleAttach()
                               !patchImport("USER32.dll", "GetSystemMetrics", (void *)&hookGetSystemMetrics)))
         early("[triple] monitor hooks failed");
     g_active = true;
-    computePanels(90.f);
+    computePanels(eyeFor(90.f, g_realistic.load(), 0));
     CreateThread(nullptr, 0, cameraThread, nullptr, 0, nullptr);
     if (spanWindow) CreateThread(nullptr, 0, spanThread, nullptr, 0, nullptr);
 }
@@ -945,8 +1013,10 @@ void tripleReport()
          g_layout.span.right - g_layout.span.left, g_layout.span.bottom - g_layout.span.top,
          g_tc.centre, g_tc.right, g_tc.left, g_tc.fov == FovSource::Game ? "game" : "rig", g_tc.panelW, g_tc.panelH, g_tc.side, g_tc.bezel);
     logf("[triple] displays: %s", g_layout.reason.c_str());
-    logf("[triple] view %s (F7 in a race: Original game view / Angle correction, saved as [triple] view)", g_original ? "original" : "angle");
+    logf("[triple] set %s, always angle-corrected; rig vertical fov %.1f (F7 in a race: Game / Realistic set, saved as [triple] fov;"
+         " Shift+F7 developer comparison, not saved)%s", g_realistic ? "Realistic" : "Game", rigVerticalFov(),
+         g_legacyOriginal ? "; ignoring superseded [triple] view=original" : "");
     logf("[triple] ui %s; menus %s", g_origArrange ? "on the centre screen" : "across the window (stock)", g_tc.menuSidesBlack ? "centre only (sides black outside gameplay)" : "three views");
-    { const CameraOffsets c = cameraNow(); logf("[camera] numpad keys in a race; offsets forward %.2f right %.2f up %.2f m, tilt %.1f, fov %+.1f; steps %.3f m, %.1f, %.1f deg", c.x, c.y, c.z, c.tilt, c.fov, g_moveStep, g_tiltStep, g_fovStep); }
-    logf("[triple] at fov 90: centre l%.3f r%.3f b%.3f t%.3f; right yaw %.1f l%.3f r%.3f", c.l, c.r, c.b, c.t, r.yaw, r.l, r.r);
+    { const CameraOffsets c = cameraNow(); logf("[camera] numpad keys in a race; offsets forward %.2f right %.2f up %.2f m, tilt %.1f, fov Game %+.1f Realistic %+.1f; steps %.3f m, %.1f, %.1f deg", c.x, c.y, c.z, c.tilt, c.fov, c.fovRealistic, g_moveStep, g_tiltStep, g_fovStep); }
+    logf("[triple] at start (eye %.1f mm): centre l%.3f r%.3f b%.3f t%.3f; right yaw %.1f l%.3f r%.3f", g_eyeMm.load(), c.l, c.r, c.b, c.t, r.yaw, r.l, r.r);
 }
