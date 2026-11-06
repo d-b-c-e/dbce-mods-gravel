@@ -66,7 +66,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/tests/Test-SetupUx
 pwsh -NoProfile -File tools/tests/Test-SetupUx.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/tests/Test-InstallPackage.ps1
 pwsh -NoProfile -File tools/tests/Test-InstallPackage.ps1
+pwsh -NoProfile -File tools/tests/Test-CameraProbe.ps1 -OutputRoot build/test-camera-probe-<stamp>
 ```
+
+`probe_camera` (camera command file) prints format v2: raw reflected values from the single live PlayerController
+candidate through PlayerCameraManager, ViewTarget and CameraCache, then exactly one `[camera-probe] v2 done status=`
+line. It derives no camera identity; a stage-4 runner must parse v2, not the old candidate list.
 
 These check file migration, capture cancellation and terminal navigation, not
 physical input, terminal readability at different DPI, force output or a drive.
