@@ -56,6 +56,17 @@ skipped. WM_CLOSE was ignored again (4 of 4); recovery was the same exact-identi
 with fresh Steam identity/log checks before restoring. The main-menu Exit hint uses another wheel button: identify it
 offline (settings.sav Exit/Back action bindings) before a stage 3.
 
+## Camera-set live smoke passed (2026-11-06, GO571267)
+
+Packet `build/live-03/case03` (case02 with a 30 s answer window and 420 s navigation). Nine in-process presses (all
+accepted/down/ended, Gravel not in front) reached a stationary offline race (Alaska, Through the Caves, Abarth 131). Then,
+by command file only: F7 -> Realistic (`[triple] fov=rig`), wider 3 -> `fov_offset_realistic_deg=6.0`, reset -> 0.0, Shift+F7
+original view and back (INI unchanged), F7 -> Game (`fov=game`); every step matched its log line and INI readback.
+Realistic visibly widened the in-car view (installed `vertical_fov` 58.7, eye distance 0); the Shift+F7 frame showed
+stretched flat side screens. Cleanup was the integrated forced stop and byte-exact restore. Evidence:
+`build/live-03/case03/live/go-571267` in the release worktree. Limits: snapshot frames, position/tilt reset unasserted,
+no wheel-feel or FFB claim, telemetry off during the run.
+
 ## Live stage 3 result (2026-11-06, GO570432): offline route proven, camera phase not reached
 
 Packet `build/live-03/case02` (operator-chosen sealed navigation). Eight in-process presses, all accepted/down/ended with
