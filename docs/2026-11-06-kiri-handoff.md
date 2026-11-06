@@ -50,8 +50,10 @@ folders. Keep the worktree until reviewers close their audits; then move `build/
 ## Next
 
 1. Owner check (checklist section 12); optional: set `eye_distance_mm=660` with the owner's consent.
-2. Per-mounted-camera sets: `probe_camera` saturates in a race (stage 4, smoke plan); next is the approved source packet
-   that follows PlayerController -> PlayerCameraManager `+0x428` -> ViewTarget/CameraCache, then rerun stage 4
-   (`build/live-04/case02`) under a fresh GO.
+2. Per-mounted-camera sets: the old `probe_camera` saturated in a race (stage 4, smoke plan). Probe v2 (`c18621a`,
+   pali SOURCE APPROVED 573932, `tools/tests/Test-CameraProbe.ps1` 49 checks) walks PlayerController ->
+   PlayerCameraManager -> ViewTarget/CameraCache and logs raw values only, ending in one `v2 done status=` line. Next:
+   bounded CPU build `-UpdateDist`, package and file-only install, then a NEW stage-4 case whose parser reads v2
+   (including `owner-unresolved`); `build/live-04/case02` cannot be reused. Each step needs review and a kole GO.
 3. Curve (curved renderer) remains unstarted work (`2026-11-01-pre-slate-trace.md`).
 4. Live packets should persist Steam log offsets (stage 3 recipe does) and keep the integrated forced-stop cleanup.
