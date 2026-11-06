@@ -3,7 +3,18 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $SourceRoot 'tools/BinaryProvenance.psm1') -Force
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('gravel-provenance-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory((Join-Path $fixture 'dist')) | Out-Null
-foreach ($name in 'dinput8.dll','wheelprobe.exe','binary-provenance.json') { Copy-Item -LiteralPath (Join-Path $SourceRoot "dist/$name") -Destination (Join-Path $fixture "dist/$name") }
+# The retained fixture comes from git blobs, not the working dist/, which may
+# now hold an adopted observed build. Same approach as Test-InstallPackage.
+function Get-GitBlobBytes([string]$Blob) {
+    $info = [Diagnostics.ProcessStartInfo]::new('git', "-C `"$SourceRoot`" cat-file blob $Blob")
+    $info.RedirectStandardOutput = $true; $info.UseShellExecute = $false
+    $process = [Diagnostics.Process]::Start($info); $stream = [IO.MemoryStream]::new()
+    $process.StandardOutput.BaseStream.CopyTo($stream); $process.WaitForExit()
+    if ($process.ExitCode) { throw "Retained fixture blob unavailable: $Blob" }
+    $stream.ToArray()
+}
+$retainedBlobs = @{ 'dinput8.dll'='4546c794a9512d48f01fe9787431ca497490c7cb'; 'wheelprobe.exe'='2e0de26f48a0b003103d4f05891cbabd259ac2e5'; 'binary-provenance.json'='21be495e63adfc3d6a011336b4cebf8ac63cb0a3' }
+foreach ($name in $retainedBlobs.Keys) { [IO.File]::WriteAllBytes((Join-Path $fixture "dist/$name"),(Get-GitBlobBytes $retainedBlobs[$name])) }
 $checks = 0
 function Assert($Value,[string]$Message) { if (-not $Value) { throw $Message }; $script:checks++ }
 function Reject([scriptblock]$Action,[string]$Message) { $failed=$false; try { & $Action | Out-Null } catch { $failed=$true }; Assert $failed $Message }
@@ -87,7 +98,8 @@ $packageSource = Join-Path $fixture 'package-source'
 foreach ($relative in @(Get-PackageFiles) + @('tools/Package.ps1','tools/BinaryProvenance.psm1','dist/binary-provenance.json')) {
     $target = Join-Path $packageSource $relative
     [IO.Directory]::CreateDirectory((Split-Path $target -Parent)) | Out-Null
-    Copy-Item -LiteralPath (Join-Path $SourceRoot $relative) -Destination $target
+    $from = if ($relative.Replace('\','/') -like 'dist/*') { Join-Path $fixture $relative } else { Join-Path $SourceRoot $relative }
+    Copy-Item -LiteralPath $from -Destination $target
 }
 $fixtureGitState = @{Mode='clean';Reads=0;StatusReads=0}
 function git {
@@ -121,7 +133,7 @@ Assert (-not (Test-Path -LiteralPath $rejectedOutput)) 'Missing provenance creat
 [IO.File]::AppendAllText((Join-Path $packageSource 'dist/wheelprobe.exe'),'synthetic changed helper')
 Reject { & (Join-Path $packageSource 'tools/Package.ps1') -OutputRoot $rejectedOutput } 'Actual packager accepted mismatched helper bytes.'
 Assert (-not (Test-Path -LiteralPath $rejectedOutput)) 'Mismatched bytes created package output.'
-Copy-Item -LiteralPath (Join-Path $SourceRoot 'dist/wheelprobe.exe') -Destination (Join-Path $packageSource 'dist/wheelprobe.exe')
+Copy-Item -LiteralPath (Join-Path $fixture 'dist/wheelprobe.exe') -Destination (Join-Path $packageSource 'dist/wheelprobe.exe')
 foreach ($mode in 'status-error','head-change','late-dirty') {
     $fixtureGitState.Mode=$mode; $fixtureGitState.Reads=0; $fixtureGitState.StatusReads=0
     $guardedOutput=Join-Path $fixture "guarded-$mode"
