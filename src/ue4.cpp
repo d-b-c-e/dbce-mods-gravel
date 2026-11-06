@@ -22,6 +22,7 @@
 #include "common.h"
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -75,13 +76,16 @@ std::string objName(BYTE *o)
     int32_t n; return (o && rd(o + O_NAME, n)) ? nameOf(n) : "";
 }
 BYTE *objClass(BYTE *o) { BYTE *c; return (o && rd(o + O_CLASS, c)) ? c : nullptr; }
-BYTE *objAt(int i)
+BYTE *itemAt(int i)
 {
     if (i < 0 || i >= g_objNum) return nullptr;
-    BYTE *item;
-    if (g_chunked) { BYTE *chunk; if (!rd(g_objs + (i / 65536) * 8, chunk) || !chunk) return nullptr; item = chunk + (i % 65536) * ITEM; }
-    else item = g_objs + i * ITEM;
-    BYTE *o; return rd(item, o) ? o : nullptr;
+    if (g_chunked) { BYTE *chunk; if (!rd(g_objs + (i / 65536) * 8, chunk) || !chunk) return nullptr; return chunk + (i % 65536) * ITEM; }
+    return g_objs + i * ITEM;
+}
+BYTE *objAt(int i)
+{
+    BYTE *item = itemAt(i);
+    BYTE *o; return (item && rd(item, o)) ? o : nullptr;
 }
 
 bool section(const char *want, size_t &off, size_t &len)
@@ -198,7 +202,8 @@ int probeOffsetSlot(BYTE *prop, BYTE *outer, int32_t propsSize)
     return 0;
 }
 struct Prop { BYTE *owner = nullptr; int offset = -1; int size = 0; std::string type, ownerName; };
-Prop findProp(const char *name)
+// owner: exact name of the declaring class/struct (no U/A/F prefix), or null for the first match anywhere.
+Prop findProp(const char *name, const char *owner = nullptr)
 {
     Prop p;
     if (!name[0]) return p;
@@ -211,6 +216,7 @@ Prop findProp(const char *name)
         if (cls.size() < 8 || cls.compare(cls.size() - 8, 8, "Property") != 0) continue;
         int32_t off = -1, sz; BYTE *outer;
         if (!rd(o + P_ELEMSIZE, sz) || !rd(o + O_OUTER, outer)) continue;
+        if (owner && objName(outer) != owner) continue;
         int32_t propsSize = 0; rd(outer + S_PROPSIZE, propsSize);
         if (!g_pOffset) {
             g_pOffset = probeOffsetSlot(o, outer, propsSize);
@@ -231,7 +237,7 @@ Prop findProp(const char *name)
         logf("[ue4] %s: %s at +0x%x (size %d) in %s", name, cls.c_str(), off, sz, p.ownerName.c_str());
         return p;
     }
-    logf("[ue4] property \"%s\" not found among %d objects", name, g_objNum);
+    logf("[ue4] property \"%s\"%s%s not found among %d objects", name, owner ? " in " : "", owner ? owner : "", g_objNum);
     return p;
 }
 bool isA(BYTE *cls, BYTE *want)
@@ -307,33 +313,132 @@ BYTE *g_inst = nullptr; int g_instIdx = -1;
 ULONGLONG g_nextScan = 0, g_nextDiscover = 0;
 bool g_propsResolved = false;
 
-// Explicit developer request only. List candidates, never infer that the first camera is the player's.
+// ---- camera identity probe (explicit developer request only) ----
+// Scanning for "camera" objects saturated on MovieScene/CameraAnim objects in a race (stage 4, GO572877), so the probe
+// follows the engine's own pointers instead: the one live PlayerController -> PlayerCameraManager -> ViewTarget and
+// CameraCache (the POV actually rendered last frame). The camera's position in the view target's frame is the identity
+// a per-camera set can key on; component lists and manager fields are logged as evidence, not interpreted.
+BYTE *findClass(const char *name)
+{
+    for (BYTE *o : snapshot()) if (o && objName(o) == name && objName(objClass(o)) == "Class") return o;
+    return nullptr;
+}
+std::string label(BYTE *o) { return o ? objName(o) + " : " + objName(objClass(o)) : std::string("null"); }
+bool liveObj(BYTE *o) { uint32_t fl; return o && rd(o + O_FLAGS, fl) && !(fl & (RF_CDO | RF_ARCHETYPE)); }
+BYTE *readObj(BYTE *base, const Prop &p)
+{
+    BYTE *v = nullptr;
+    return (base && p.offset >= 0 && rd(base + p.offset, v) && plausiblePtr((uint64_t)v)) ? v : nullptr;
+}
+// FWeakObjectPtr {ObjectIndex, SerialNumber}: valid only while the item's SerialNumber (+0x10 in 4.17) still matches.
+BYTE *readWeak(BYTE *base, const Prop &p)
+{
+    int32_t w[2], serial; BYTE *item;
+    if (!base || p.offset < 0 || !safeRead(base + p.offset, w, sizeof w) || !w[1]) return nullptr;
+    if (!(item = itemAt(w[0])) || !rd(item + 0x10, serial) || serial != w[1]) return nullptr;
+    return objAt(w[0]);
+}
+struct View { float loc[3] = {}, rot[3] = {}, fov = 0; bool ok = false; };
+struct ViewLayout { Prop loc, rot, fov; bool ok() const { return loc.offset >= 0 && rot.offset >= 0 && fov.offset >= 0; } };
+View readView(BYTE *at, const ViewLayout &l)
+{
+    View v;
+    v.ok = at && l.ok() && safeRead(at + l.loc.offset, v.loc, sizeof v.loc) && safeRead(at + l.rot.offset, v.rot, sizeof v.rot) &&
+           rd(at + l.fov.offset, v.fov);
+    return v;
+}
+// d expressed in the frame of a UE FRotator {pitch, yaw, roll} (FRotationMatrix axes; cm, X forward, Y right, Z up).
+void toLocal(const float d[3], const float rot[3], float out[3])
+{
+    const float k = 3.14159265f / 180.f;
+    float sp = sinf(rot[0] * k), cp = cosf(rot[0] * k), sy = sinf(rot[1] * k), cy = cosf(rot[1] * k), sr = sinf(rot[2] * k), cr = cosf(rot[2] * k);
+    const float x[3] = {cp * cy, cp * sy, sp};
+    const float y[3] = {sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp};
+    const float z[3] = {-(cr * sp * cy + sr * sy), cy * sr - cr * sp * sy, cr * cp};
+    out[0] = d[0] * x[0] + d[1] * x[1] + d[2] * x[2];
+    out[1] = d[0] * y[0] + d[1] * y[1] + d[2] * y[2];
+    out[2] = d[0] * z[0] + d[1] * z[1] + d[2] * z[2];
+}
+// Values of the manager's own fields (classes below PlayerCameraManager): a Blueprint camera index/mode would show here.
+void dumpValues(BYTE *inst, const char *stopAt)
+{
+    BYTE *cls = objClass(inst);
+    const auto objs = snapshot();
+    for (int depth = 0; cls && depth < 8 && objName(cls) != stopAt; ++depth) {
+        for (BYTE *o : objs) {
+            BYTE *ou; if (!o || !rd(o + O_OUTER, ou) || ou != cls) continue;
+            std::string type = objName(objClass(o));
+            if (type.size() < 8 || type.compare(type.size() - 8, 8, "Property") != 0) continue;
+            int32_t off = -1, sz = 0; if (!g_pOffset || !rd(o + g_pOffset, off) || off < 0) continue;
+            rd(o + P_ELEMSIZE, sz);
+            Prop p; p.offset = off; p.size = sz;
+            char val[160] = "?";
+            int32_t i32; float f; uint8_t b;
+            if (type == "IntProperty" && rd(inst + off, i32)) snprintf(val, sizeof val, "%d", i32);
+            else if (type == "FloatProperty" && rd(inst + off, f)) snprintf(val, sizeof val, "%.3f", f);
+            else if ((type == "ByteProperty" || type == "EnumProperty") && sz == 1 && rd(inst + off, b)) snprintf(val, sizeof val, "%u", b);
+            else if (type == "BoolProperty" && rd(inst + off, b)) snprintf(val, sizeof val, "byte 0x%02x (bitfield mask unread)", b);
+            else if (type == "ObjectProperty") snprintf(val, sizeof val, "%s", label(readObj(inst, p)).c_str());
+            else if (type == "WeakObjectProperty") snprintf(val, sizeof val, "%s", label(readWeak(inst, p)).c_str());
+            else continue;
+            logf("[camera-probe]   %s.%s (%s +0x%x) = %s", objName(cls).c_str(), objName(o).c_str(), type.c_str(), off, val);
+        }
+        if (!rd(cls + S_SUPER, cls)) break;
+    }
+}
 void probeCameras()
 {
-    const auto objs = snapshot();
-    std::vector<BYTE*> classes;
-    int shown = 0;
-    for (size_t i = 0; i < objs.size() && shown < 128; ++i) {
-        BYTE* o = objs[i]; uint32_t flags;
-        if (!o || !rd(o + O_FLAGS, flags) || (flags & (RF_CDO | RF_ARCHETYPE))) continue;
-        BYTE* cls = objClass(o);
-        const auto type = objName(cls);
-        auto low = type;
-        for (auto& ch : low) if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
-        if (low.find("camera") == low.npos && low.find("playercontroller") == low.npos) continue;
-        BYTE* outer = nullptr; rd(o + O_OUTER, outer);
-        logf("[camera-probe] candidate #%zu %s : %s, outer %s", i, objName(o).c_str(), type.c_str(), objName(outer).c_str());
-        ++shown;
-        if (classes.size() < 12 && std::find(classes.begin(), classes.end(), cls) == classes.end()) {
-            classes.push_back(cls);
-            // Include inherited fields such as PlayerController.PlayerCameraManager and CameraComponent.FieldOfView.
-            for (int depth = 0; cls && depth < 8; ++depth) {
-                dumpClass(cls, objName(cls).c_str());
-                if (!rd(cls + S_SUPER, cls)) break;
-            }
-        }
+    BYTE *pcClass = findClass("PlayerController");
+    std::vector<BYTE *> pcs;
+    if (pcClass) for (BYTE *o : snapshot()) if (liveObj(o) && isA(objClass(o), pcClass)) pcs.push_back(o);
+    if (pcs.size() != 1) {
+        logf("[camera-probe] %zu live PlayerController instances; need exactly one, no identity", pcs.size());
+        for (size_t i = 0; i < pcs.size() && i < 8; ++i) logf("[camera-probe]   controller %s", label(pcs[i]).c_str());
+        return;
     }
-    logf("[camera-probe] done: %d candidates (limit 128), %zu class hierarchies (limit 12); active camera not established", shown, classes.size());
+    BYTE *pc = pcs[0];
+    Prop pPcm = findProp("PlayerCameraManager", "PlayerController");
+    BYTE *pcm = readObj(pc, pPcm);
+    logf("[camera-probe] controller %s -> camera manager %s", label(pc).c_str(), label(pcm).c_str());
+    if (!pcm) return;
+    dumpValues(pcm, "PlayerCameraManager");
+    ViewLayout vl{findProp("Location", "MinimalViewInfo"), findProp("Rotation", "MinimalViewInfo"), findProp("FOV", "MinimalViewInfo")};
+    Prop pVt = findProp("ViewTarget", "PlayerCameraManager"), pCache = findProp("CameraCache", "PlayerCameraManager");
+    Prop pTarget = findProp("Target", "TViewTarget"), pVtPov = findProp("POV", "TViewTarget"), pCachePov = findProp("POV", "CameraCacheEntry");
+    if (!vl.ok() || pVt.offset < 0 || pCache.offset < 0 || pTarget.offset < 0 || pVtPov.offset < 0 || pCachePov.offset < 0) {
+        logf("[camera-probe] view struct layout not resolved; no identity");
+        return;
+    }
+    BYTE *vt = pcm + pVt.offset;
+    BYTE *target = readObj(vt, pTarget);
+    View pov = readView(pcm + pCache.offset + pCachePov.offset, vl), vtPov = readView(vt + pVtPov.offset, vl);
+    logf("[camera-probe] view target %s", label(target).c_str());
+    if (pov.ok) logf("[camera-probe] rendered POV loc (%.1f %.1f %.1f) rot (%.2f %.2f %.2f) fov %.2f", pov.loc[0], pov.loc[1], pov.loc[2], pov.rot[0], pov.rot[1], pov.rot[2], pov.fov);
+    if (vtPov.ok) logf("[camera-probe] view-target POV loc (%.1f %.1f %.1f) fov %.2f", vtPov.loc[0], vtPov.loc[1], vtPov.loc[2], vtPov.fov);
+    Prop pRoot = findProp("RootComponent", "Actor"), pRelLoc = findProp("RelativeLocation", "SceneComponent"),
+         pRelRot = findProp("RelativeRotation", "SceneComponent"), pFov = findProp("FieldOfView", "CameraComponent");
+    BYTE *root = readObj(target, pRoot);
+    float rl[3], rr[3];
+    if (pov.ok && root && pRelLoc.offset >= 0 && pRelRot.offset >= 0 && safeRead(root + pRelLoc.offset, rl, sizeof rl) && safeRead(root + pRelRot.offset, rr, sizeof rr)) {
+        // An unattached root's relative transform is its world transform (vehicle roots are unattached).
+        const float d[3] = {pov.loc[0] - rl[0], pov.loc[1] - rl[1], pov.loc[2] - rl[2]};
+        float local[3]; toLocal(d, rr, local);
+        float dy = pov.rot[1] - rr[1]; while (dy > 180) dy -= 360; while (dy < -180) dy += 360;
+        logf("[camera-probe] identity: target class %s, camera in target frame (%.0f %.0f %.0f) cm, pitch %.1f yaw %.1f, fov %.1f (root %s)",
+             objName(objClass(target)).c_str(), local[0], local[1], local[2], pov.rot[0] - rr[0], dy, pov.fov, label(root).c_str());
+    } else {
+        logf("[camera-probe] no identity: rendered POV or target root transform unreadable");
+    }
+    BYTE *camClass = findClass("CameraComponent");
+    int n = 0;
+    if (target && camClass) for (BYTE *o : snapshot()) {
+        BYTE *ou; if (!liveObj(o) || !rd(o + O_OUTER, ou) || ou != target || !isA(objClass(o), camClass)) continue;
+        float f = 0, l[3] = {}; if (pFov.offset >= 0) rd(o + pFov.offset, f);
+        if (pRelLoc.offset >= 0) safeRead(o + pRelLoc.offset, l, sizeof l);
+        logf("[camera-probe]   component %s fov %.1f relative (%.0f %.0f %.0f)", label(o).c_str(), f, l[0], l[1], l[2]);
+        ++n;
+    }
+    logf("[camera-probe] done: %d camera components on the view target", n);
 }
 
 float readF(BYTE *o, const Prop &p) { float v; return (p.offset >= 0 && rd(o + p.offset, v)) ? v : 0.f; }
