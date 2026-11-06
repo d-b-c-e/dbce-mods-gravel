@@ -45,6 +45,14 @@ So R1 can confirm, go back and switch camera, but it **cannot move menu focus or
 Pause stay on R4 (Escape and E0 arrow keys through `tools/qualification/Invoke-GravelStep.ps1`, under lease with the
 owner idle), or the owner drives the menus. Adding wheel bindings for them is an owner settings change; it is out of scope.
 
+R4 keys need Gravel in front, and the elevated owner VS Code usually keeps the foreground. Owner decision 2026-11-06
+(via kole, automated-testing SKILL.md section 4): after the ordinary `SetForegroundWindow` is refused, make **one**
+`AttachThreadInput` + `SetForegroundWindow` attempt on the pinned UnrealWindow. Before attaching, validate
+PID/birth/image/HWND/class and recheck the captured foreground pair, then validate again after. Send no synthesized
+input during the attempt, always detach in `finally`, and record a structured result. If Gravel is still not in front,
+the R4 rows end at activation: no other bypass, no F24 or global keys, no lock-timeout change, no minimize or restore.
+R1 rows do not need focus. This is a separate delta that needs review in the run packet.
+
 ## Preflight (game closed)
 
 1. kole GO, then `tools\Rig-Lease.ps1 -Enter -Name kiri -Purpose 'Gravel installed-build smoke'`. Run
