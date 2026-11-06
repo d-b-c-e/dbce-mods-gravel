@@ -48,6 +48,14 @@ adapted from loki's DR2 runner; pali-approved, kole GO). Evidence: `case07/live/
 - Next: menu navigation to an offline race (Free Race is one entry down; the R12 D-pad hat through R1 is the candidate)
   and the in-game quit route, as a reviewed stage 2.
 
+## Live stage 2 result (2026-11-06, GO569238): in-game quit not found yet
+
+Packet `build/live-02/case02` (three operator-gated presses). Confirm again moved press-start -> main menu with Gravel not
+in front. **Back (index 1, WheelConfig Button2) did nothing on the main menu** (no quit prompt), so the third press was
+skipped. WM_CLOSE was ignored again (4 of 4); recovery was the same exact-identity forced stop and byte-exact restore,
+with fresh Steam identity/log checks before restoring. The main-menu Exit hint uses another wheel button: identify it
+offline (settings.sav Exit/Back action bindings) before a stage 3.
+
 ## Wheel bindings available for R1 injection (MOZA R12, product 0006346e)
 
 From `settings.sav` via `tools/dump_bindings.py --wheel` and the `[/Wheel.Config/0006346e]` section of
