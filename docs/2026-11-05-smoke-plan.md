@@ -31,6 +31,23 @@ packets. The 2026-11-05 identity (DLL `E6DAA565`, INI `FB2C615D`) is now the rol
 
 If any hash differs at preflight, stop and report it. Do not re-baseline silently.
 
+## Live stage 1 result (2026-11-06, GO568362)
+
+First live run of the installed build (packet `E:/Source/_work/dbce-mods-gravel-release-dd742f3/build/live-01/case07`,
+adapted from loki's DR2 runner; pali-approved, kole GO). Evidence: `case07/live/go-568362`.
+
+- One in-process R1 Confirm (`inject raw button 0`, 150 ms) at the press-start screen was accepted, read (down) and ended,
+  and the next capture showed the main menu (Off-Road Masters, Free Race, Multiplayer, Time Attack, Weekly Challenges,
+  DLC). Gravel was **not** the foreground window before or after the press: the R1 route works without OS focus.
+  (Frame transition only; capture time is not exposure time, and foreground snapshots are correlation.)
+- Telemetry was turned off for the session (`[telemetry] enabled=0`); the mod logged "UDP disabled" and status lines continued.
+- **Gravel ignores WM_CLOSE** (3 of 3 attempts: twice on Nov 1, once here). The run held custody; recovery was an
+  exact-identity forced stop of the shipping process under the owner's own-stuck-process policy, then byte-exact restore.
+  Future packets need an in-game quit route (the Exit hint / Back then Confirm) instead of relying on WM_CLOSE.
+- Steam userdata 558260 changed naturally during the run (archived, never restored).
+- Next: menu navigation to an offline race (Free Race is one entry down; the R12 D-pad hat through R1 is the candidate)
+  and the in-game quit route, as a reviewed stage 2.
+
 ## Wheel bindings available for R1 injection (MOZA R12, product 0006346e)
 
 From `settings.sav` via `tools/dump_bindings.py --wheel` and the `[/Wheel.Config/0006346e]` section of
