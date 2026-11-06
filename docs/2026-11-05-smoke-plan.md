@@ -56,6 +56,16 @@ skipped. WM_CLOSE was ignored again (4 of 4); recovery was the same exact-identi
 with fresh Steam identity/log checks before restoring. The main-menu Exit hint uses another wheel button: identify it
 offline (settings.sav Exit/Back action bindings) before a stage 3.
 
+## Live stage 3 result (2026-11-06, GO570432): offline route proven, camera phase not reached
+
+Packet `build/live-03/case02` (operator-chosen sealed navigation). Eight in-process presses, all accepted/down/ended with
+Gravel not in front, reached the loaded track: Confirm (press-start -> main menu), **hat-down (the D-pad hat does move
+the menu highlight: Off-Road Masters -> Free Race)**, Confirm Free Race -> Alaska (Cross Country) -> Through the Caves ->
+Abarth 131 Rally -> owned livery -> race summary (Day, Clear, AI Easy) -> pre-race menu on the track with START RACE
+highlighted; the side screens showed the forest. The ninth answer arrived after its frame deadline, so the runner stopped
+with no press and its integrated forced-stop cleanup restored everything. Known route to a race: 9 presses (Confirm,
+hat-down, Confirm x7). A successor needs a longer answer window and navigation budget.
+
 ## Wheel bindings available for R1 injection (MOZA R12, product 0006346e)
 
 From `settings.sav` via `tools/dump_bindings.py --wheel` and the `[/Wheel.Config/0006346e]` section of
