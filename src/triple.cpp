@@ -110,23 +110,39 @@ Frustum panel(V3 pa, V3 pb, V3 pc)
     return {std::atan2(fwd.x, fwd.z) * 180 / Pi, dot(vr, pa) / d, dot(vr, pb) / d, dot(vu, pa) / d, dot(vu, pc) / d};
 }
 
+// --- effective FOV (Test-FovSets.ps1 compiles this block unchanged, up to computePanels) ---
 // Seat-true vertical FOV of the measured rig: from the eye distance when set, else vertical_fov.
 double rigVerticalFov()
 {
     return g_tc.eye > 0 ? 2 * std::atan(g_tc.panelH / 2 / g_tc.eye) * 180 / Pi : g_tc.vfov;
 }
 
-// Eye distance. Game set: from the game's horizontal FOV on the centre panel, so the centre shows what the game shows
-// on one screen and the sides continue it at the rig's panel angle. Realistic set: the rig's seat-true vertical FOV
-// plus that set's own saved offset; with no offset it is exactly the measured eye distance.
+// One rule for every set's numpad tune: base + offset, kept within 20..120 widened to include the base itself, so the
+// measured or game start is never replaced and a tune never moves the view the opposite way.
+double tunedFov(double base, double offset)
+{
+    return std::min(std::max(120.0, base), std::max(std::min(20.0, base), base + offset));
+}
+
+// Eye distance. Game set: from the game's horizontal FOV (already tuned) on the centre panel, so the centre shows what
+// the game shows on one screen and the sides continue it at the rig's panel angle. Realistic set: the rig's seat-true
+// vertical FOV tuned by that set's own offset; with no offset it is exactly the measured eye distance.
 double eyeFor(float gameFov, bool realistic, float rigOffset)
 {
     const double w = g_tc.panelW, h = g_tc.panelH;
     if (!realistic && gameFov > 5 && gameFov < 170) return w / 2 / std::tan(gameFov * Pi / 360);
     if (rigOffset == 0 && g_tc.eye > 0) return g_tc.eye;
-    const double v = std::min(120.0, std::max(20.0, rigVerticalFov() + rigOffset));
-    return h / 2 / std::tan(v * Pi / 360);
+    return h / 2 / std::tan(tunedFov(rigVerticalFov(), rigOffset) * Pi / 360);
 }
+
+// Notice name of a set: "Game FOV" or "Realistic FOV 34°", plus " (Custom)" when its FOV is tuned. The Realistic number
+// is the same tunedFov the projection uses.
+void setLabelFor(char *out, size_t n, bool realistic, float gameOffset, float rigOffset)
+{
+    if (!realistic) { snprintf(out, n, "Game FOV%s", gameOffset ? " (Custom)" : ""); return; }
+    snprintf(out, n, "Realistic FOV %.0f\xC2\xB0%s", tunedFov(rigVerticalFov(), rigOffset), rigOffset ? " (Custom)" : "");
+}
+// --- end effective FOV ---
 
 void computePanels(double d)
 {
@@ -277,7 +293,7 @@ FMatrixF *hookProjection(const void *self, FMatrixF *out, int pass, float fov)
     if (inGameplay()) {
         const CameraOffsets c = cameraNow();
         if (realistic) rigOffset = c.fovRealistic;
-        else fov = std::min(120.f, std::max(20.f, fov + c.fov));
+        else fov = (float)tunedFov(fov, c.fov);
     }
     const double d = eyeFor(fov, realistic, rigOffset);
     if (std::fabs(d - g_eyeMm.load()) > 1e-3 || g_panelsFlat.load() != g_original.load()) computePanels(d);
@@ -784,13 +800,11 @@ void showNotice(const char *text)
     g_noticeUntil = GetTickCount64() + 2500;
 }
 
-// The active set's name for notices: "Game FOV" or "Realistic FOV 34°", plus " (Custom)" when its FOV is tuned.
+// The active set's notice name from the current offsets.
 void setLabel(char *out, size_t n)
 {
     const CameraOffsets c = cameraNow();
-    if (!g_realistic.load()) { snprintf(out, n, "Game FOV%s", c.fov ? " (Custom)" : ""); return; }
-    const double v = std::min(120.0, std::max(20.0, rigVerticalFov() + c.fovRealistic));
-    snprintf(out, n, "Realistic FOV %.0f\xC2\xB0%s", v, c.fovRealistic ? " (Custom)" : "");
+    setLabelFor(out, n, g_realistic.load(), c.fov, c.fovRealistic);
 }
 
 void setKey()
