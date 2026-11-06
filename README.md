@@ -23,7 +23,7 @@ and its runtime qualification are still pending.
 ## Development status
 
 Current qualification, installed identity, rollback and ordered next steps are in the
-[November 1 handoff](docs/2026-11-01-mevu-handoff.md). Native atomic camera saves and
+[November 6 handoff](docs/2026-11-06-kiri-handoff.md) (history: [November 1](docs/2026-11-01-mevu-handoff.md)). Native atomic camera saves and
 an opt-in camera probe are source work. In source (not yet built or installed), F7 switches the
 Game / Realistic field-of-view set for all cameras and Shift+F7 is a session-only developer
 comparison; per-mounted-camera sets, curved presentation, in-game F6 and gameplay route

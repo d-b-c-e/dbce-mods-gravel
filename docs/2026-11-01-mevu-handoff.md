@@ -1,5 +1,7 @@
 # Gravel handoff — November 1, 2026
 
+> Superseded for current state by [`2026-11-06-kiri-handoff.md`](2026-11-06-kiri-handoff.md); kept for history.
+
 ## Current disposition
 
 Cleanup is complete; no lease or process custody remains. Owner stopped engineering loops and live testing. This documentation wrap makes no new build, install, game launch or rig run. The latest development work is preserved on main; **no new coherent dfbab9a installable was deployed**.
