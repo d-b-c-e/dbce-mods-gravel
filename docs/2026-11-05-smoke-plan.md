@@ -1,4 +1,4 @@
-# Gravel installed-build smoke plan (offline draft, not authorized)
+# Gravel installed-build smoke plan (live allowed by kole 549126; each stage needs its own reviewed packet)
 
 Prepared 2026-11-05 by kiri for kole request 539150. **Do not run this until kole
 confirms with the owner**: the owner stopped Gravel live loops on November 1
@@ -16,14 +16,17 @@ These are Ready-For-Test facts for the installed build, not camera, curve or FFB
    for camera identity (handoff step 2). Resolving identity is offline analysis afterwards, not a pass criterion here.
 4. The game closes gracefully and every snapshotted file returns byte-exact.
 
-## Installed identity (R0, read 2026-11-05)
+## Installed identity (file-only install GO564244, 2026-11-06 14:56Z)
+
+kole allowed the live smoke while the owner is away (549126); the build below was installed under pali-approved
+packets. The 2026-11-05 identity (DLL `E6DAA565`, INI `FB2C615D`) is now the rollback baseline.
 
 | Item | Value |
 |---|---|
-| `dinput8.dll` | `E6DAA565E2A424CED280091902C3EDAE580BB24E826F999278AC6EDE2E4828FC`, remi a106620 dev build, file-only deploy 2026-11-03 22:08 |
-| `milestone_mod.ini` | `FB2C615D20670B383A62E0C9BD8E32CE835D6135D1EE174AE90E32057F78C407` (Wheelkit rewrite 2026-11-04 20:22; `log=1`, telemetry on, port 8000, `[fmod] discover=1`) |
+| `dinput8.dll` | `02F52D7BF62317FAAD79AE3DA2E6FA68348A58B55D869D27CAE13135EC8B6840`, observed clean build of 6cfc5a6 (dist ba0d88d), package e3b8c08 |
+| `milestone_mod.ini` | `4433C2DA242DFFF35CB44074A877F2F2113770BA6C3C26F967FA5CA275FED883` = previous `FB2C615D` + the package `[camera]` block (`log=1`, telemetry on, port 8000, `[fmod] discover=1`) |
 | `gravel-Win64-Shipping.exe` | `28032B882FFF6DAE07B185B93FD5989ADE09DC36C2EC070ECC1D05B3A73D2A95`, Steam build 3477925 |
-| Receipt / backup | `milestone_install.json`; `E:/Source/_archive/2026-11-04/owner-before-gravel-040715330` |
+| Receipt / rollback | `milestone_install.json` `7A359C58`; installer backup `DBCE-Wheel-Backups/20261106-085556-18a619`; external snapshot `artifacts/install-564244/state` |
 | Last mod log | `milestone_mod.log` 2026-10-06, so this build has never run |
 
 If any hash differs at preflight, stop and report it. Do not re-baseline silently.
