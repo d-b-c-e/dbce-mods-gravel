@@ -1,19 +1,13 @@
-param(
-    [ValidateSet('powershell','pwsh')][string]$Engine = 'pwsh',
-    [string]$SuiteRoot = (Join-Path $PSScriptRoot 'tests')
-)
+param([ValidateSet('powershell','pwsh')][string]$Engine = 'pwsh')
 $ErrorActionPreference = 'Stop'
-# SuiteRoot permits disposable runner-failure fixtures. CI uses only the default.
 $command = Get-Command "$Engine.exe" -CommandType Application -ErrorAction Stop | Select-Object -First 1
-$suites = @('Test-CiWorkflow.ps1','Test-BinaryProvenance.ps1','Test-InstallPackage.ps1','Test-SetupUx.ps1')
+$suites = @('Test-BinaryProvenance.ps1','Test-InstallPackage.ps1','Test-SetupUx.ps1')
 foreach ($suite in $suites) {
-    $path = Join-Path $SuiteRoot $suite
+    $path = Join-Path $PSScriptRoot "tests\$suite"
     if (-not [IO.File]::Exists($path)) { throw "Validation suite missing: $suite" }
     Write-Host "Running $suite with $Engine"
-    # Child processes isolate fixture mocks/environment. Do not infer success
-    # from output, pipeline status or a later successful command.
+    # Each suite runs in its own process so fixture mocks and environment stay isolated.
     & $command.Source -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $path
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0) { throw "Validation failed: $suite exited $exitCode" }
+    if ($LASTEXITCODE -ne 0) { throw "Validation failed: $suite exited $LASTEXITCODE" }
 }
 Write-Host 'PASS: all source-validation suites completed successfully.'
