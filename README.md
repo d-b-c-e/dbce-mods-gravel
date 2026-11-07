@@ -306,38 +306,21 @@ and the error identifies recovery backups; close the game before recovery.
 
 ## Build
 
-Hosted source checks run only by explicit `workflow_dispatch`; pushes and pull
-requests do not start this workflow. Local builds, package creation and artifact
-upload can proceed separately when authorized, without waiting for Actions minutes.
-
-For the reviewed installer source `3eb31450148665ee1a5526dff0c5ce828068b79f`,
-these commands were run directly in an existing PowerShell 7 (`pwsh`) session
-from the repository root, without changing execution policy:
-
-```powershell
-& .\tools\tests\Test-InstallPackage.ps1  # PASS: 234 install/package checks
-& .\tools\tests\Test-SetupUx.ps1         # PASS: 141 offline UX/migration checks
-```
-
-The local review receipts are `gravel-plan-path-safety-tests-pwsh.log`,
-`gravel-plan-path-safety-setup-pwsh.log` and
-`gravel-install-plan-path-safety-hash-catalog.json` beside the review bundle.
-These are synthetic source checks, not a native build, packaged release or game
-acceptance result. Windows PowerShell 5.1 remains separately unvalidated after
-the scripts-disabled denial; no retry or policy override was performed.
-Installer path validation remains a point-in-time check.
-
 Only needed when working from source. MSYS2 MinGW-w64 GCC 16 is required;
 pass `-Toolchain` to use another bin folder. Build checks x64 format, all six
 proxy exports and missing compiler runtime dependencies, without opening a device.
+Built binaries are not committed; they go to `build/`.
 
 ```powershell
-.\build.ps1 -UpdateDist        # build proxy + input helper, refresh dist/
+.\build.ps1                   # build proxy + input helper into build/
 .\tools\tests\Test-SetupUx.ps1
 .\tools\tests\Test-InstallPackage.ps1
-# Commit source and dist before packaging:
-.\tools\Package.ps1           # complete ZIP + SHA256 manifest in artifacts/
+# Commit source before packaging:
+.\tools\Package.ps1           # builds this commit, then the complete ZIP + SHA256 manifest in artifacts/
 ```
+
+`tools\Invoke-SourceValidation.ps1 -Engine pwsh` (or `-Engine powershell`) runs both test suites;
+the hosted source check runs the same thing, only by explicit `workflow_dispatch`.
 
 A 32-bit game needs a 32-bit build. The Forza encoder and the installer's
 Steam/DirectInput helpers are vendored from

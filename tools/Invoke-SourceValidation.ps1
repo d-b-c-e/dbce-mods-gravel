@@ -1,7 +1,7 @@
 param([ValidateSet('powershell','pwsh')][string]$Engine = 'pwsh')
 $ErrorActionPreference = 'Stop'
 $command = Get-Command "$Engine.exe" -CommandType Application -ErrorAction Stop | Select-Object -First 1
-$suites = @('Test-BinaryProvenance.ps1','Test-InstallPackage.ps1','Test-SetupUx.ps1')
+$suites = @('Test-InstallPackage.ps1','Test-SetupUx.ps1')
 foreach ($suite in $suites) {
     $path = Join-Path $PSScriptRoot "tests\$suite"
     if (-not [IO.File]::Exists($path)) { throw "Validation suite missing: $suite" }

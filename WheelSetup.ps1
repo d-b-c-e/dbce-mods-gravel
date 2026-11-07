@@ -56,6 +56,7 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $probe = Join-Path $root 'tools\wheelprobe\wheelprobe.exe'
 if (-not (Test-Path $probe)) { $probe = Join-Path $root 'dist\wheelprobe.exe' }
+if (-not (Test-Path $probe)) { $probe = Join-Path $root 'build\wheelprobe.exe' }
 Import-Module (Join-Path $root 'tools\SetupUx.psm1') -Force
 
 function Say($m, $c = 'Gray') { Write-Host $m -ForegroundColor $c }
@@ -82,9 +83,9 @@ if (-not (Test-Path $probe)) {
 
 # ---------------------------------------------------------------- the game
 # Steam discovery and DirectInput enumeration come from dbce-wheel-mod-toolkit's
-# PowerShell module, vendored under lib\toolkit (tools\Sync-Toolkit.ps1).
+# PowerShell module, vendored under lib\toolkit (the toolkit's tools\Sync-Toolkit.ps1).
 $toolkit = Join-Path $root 'lib\toolkit\powershell\DbceWheel.psm1'
-if (-not (Test-Path $toolkit)) { Die "lib\toolkit is missing - run tools\Sync-Toolkit.ps1, or re-download the release" }
+if (-not (Test-Path $toolkit)) { Die "lib\toolkit is missing - re-download the release" }
 Import-Module $toolkit -Force
 
 Say "Wheel settings - Milestone" 'White'

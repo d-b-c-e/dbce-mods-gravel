@@ -9,9 +9,9 @@ Portfolio rules: `E:\Source\dbce-project-mgmt\HOW-WE-WORK.md` (read first; it re
 - Config and log keep the old names `milestone_mod.ini` / `milestone_mod.log`; renaming would break installs.
 
 ## Build
-- `.\build.ps1 -UpdateDist`: x64 proxy plus input helper, PE/export/import checks. Keep `dist/dinput8.dll` in step with `src/` when committing.
-- `.\tools\Package.ps1`: complete ZIP with per-file SHA256 manifest (commit source and dist first).
-- `build.sh` hardcodes `/e/msys64`; adjust it. Source validation: `tools\Invoke-SourceValidation.ps1`.
+- `.\build.ps1`: x64 proxy plus input helper into `build/`, PE/export/import checks. Built binaries are not committed.
+- `.\tools\Package.ps1`: commit source first; it runs `build.ps1`, then writes the complete ZIP with a per-file SHA256 manifest. The binaries keep their `dist\` place inside the ZIP and in the installed `DBCE-Wheel-Setup` (install receipts list those paths).
+- `build.sh` hardcodes `/e/msys64`; adjust it. Source validation (both test suites): `tools\Invoke-SourceValidation.ps1 -Engine pwsh|powershell`.
 
 ## Test
 - Unit tests (disposable fixtures only): `tools/tests/Test-SetupUx.ps1`, `tools/tests/Test-InstallPackage.ps1` (run with both `powershell.exe` and `pwsh`), `tools/tests/Test-CameraProbe.ps1 -OutputRoot build/test-camera-probe-<stamp>`.
@@ -20,7 +20,7 @@ Portfolio rules: `E:\Source\dbce-project-mgmt\HOW-WE-WORK.md` (read first; it re
 - Close the game first; it locks the DLL.
 
 ## Install on the rig
-- `.\Install.ps1 -Game Gravel` (also `-GamePath "<...\gravel\Binaries\Win64>"`, `-Port`, `-Format`, `-Product`); `-Check` or `-DryRun` previews. It verifies the manifest hashes, backs up before writing and rolls back partial changes.
+- Install from an extracted package (`artifacts\milestone-wheel-tools-<version>-<commit>\`), not the repo root: `.\Install.ps1 -Game Gravel` (also `-GamePath "<...\gravel\Binaries\Win64>"`, `-Port`, `-Format`, `-Product`); `-Check` or `-DryRun` previews. It verifies the manifest hashes, backs up before writing and rolls back partial changes.
 - `.\Uninstall.ps1` removes only receipt-matching files and keeps edited ones. Closed-game guard applies to both.
 - The setup tool is deployed as `DBCE-Wheel-Setup` beside the exe.
 

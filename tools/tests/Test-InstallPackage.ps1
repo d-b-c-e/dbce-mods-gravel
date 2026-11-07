@@ -7,13 +7,16 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) ('milestone-install-' + [guid]::
 $sourceRoot = $PackageRoot
 $PackageRoot = Join-Path $fixture 'package'
 [IO.Directory]::CreateDirectory($PackageRoot) | Out-Null
+$builtPackage = Test-Path -LiteralPath (Join-Path $sourceRoot 'package-manifest.json')
 foreach ($relative in Get-PackageFiles) {
     $to = Join-Path $PackageRoot $relative
     [IO.Directory]::CreateDirectory((Split-Path $to -Parent)) | Out-Null
+    # A source checkout has no binaries (build output is not committed); inert bytes stand in. Never loaded.
+    if (-not $builtPackage -and $relative -like 'dist\*') { [IO.File]::WriteAllText($to, "milestone_mod fixture $relative - never loaded"); continue }
     Copy-Item -LiteralPath (Join-Path $sourceRoot $relative) -Destination $to
 }
 $manifestPath = Join-Path $PackageRoot 'package-manifest.json'
-if (Test-Path -LiteralPath (Join-Path $sourceRoot 'package-manifest.json')) {
+if ($builtPackage) {
     Copy-Item -LiteralPath (Join-Path $sourceRoot 'package-manifest.json') -Destination $manifestPath
 } else {
     $files = @(Get-PackageFiles | ForEach-Object { [pscustomobject]@{ Path=$_.Replace('\','/'); SHA256=(Get-FileHash -LiteralPath (Join-Path $PackageRoot $_)).Hash } })

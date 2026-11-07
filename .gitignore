@@ -3,9 +3,6 @@ artifacts/
 *.log
 **/bin/
 **/obj/
-
-# The prebuilt DLL ships so users need no MSYS2 toolchain.
-!dist/
-!dist/dinput8.dll
-!dist/wheelprobe.exe
+# Built binaries are not committed: build.ps1 writes build/, tools/Package.ps1 puts them in the ZIP.
+dist/
 tools/wheelprobe/*.exe

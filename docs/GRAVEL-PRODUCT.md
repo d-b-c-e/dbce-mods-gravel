@@ -5,8 +5,7 @@ The organization documentation was published in commit
 The canonical repository is [d-b-c-e/dbce-mods-gravel](https://github.com/d-b-c-e/dbce-mods-gravel).
 The in-place rename and documentation integration are complete. Neither created
 a product release. Installer ownership safety was independently reviewed and
-promoted to main at `54561c88ff1a43fe0adf2cf4f7b5f35066a69bea`; the package
-provenance follow-up is now a separate review candidate.
+promoted to main at `54561c88ff1a43fe0adf2cf4f7b5f35066a69bea`.
 
 ## Repository and ownership
 
@@ -46,16 +45,12 @@ The reviewed organization change retained `VERSION` at 0.2.0. Preserve the exist
 naming is separate from these installed compatibility contracts. Preserve
 existing settings, receipt-owned file checks, closed-game guards and rollback.
 
-`tools/Package.ps1` reads VERSION and a clean committed source identity, copies
-the exact `Get-PackageFiles` allowlist, hashes every file, validates the manifest
-and creates one ZIP. This document is source documentation; it is not added to
-that allowlist. README remains part of the existing package. No binary rebuild
-or release publication is proposed by this documentation change.
-
-The packaging-source identity is distinct from retained binary origin. The
-provenance review candidate requires exact retained-artifact metadata and hashes
-before ZIP creation; see [binary provenance](BINARY-PROVENANCE.md). Missing build
-receipts do not become fresh-build claims. Installer/removal behavior is unchanged.
+`tools/Package.ps1` reads VERSION and a clean committed source identity, runs
+`build.ps1` on that commit, copies the exact `Get-PackageFiles` allowlist (the two
+binaries come from `build/` and keep their `dist/` place in the ZIP), hashes every
+file, validates the manifest and creates one ZIP. Built binaries are not committed
+(2026-11-07); history keeps the old `dist/` files. This document is source
+documentation; it is not added to that allowlist. README remains part of the package.
 
 Keep the vendored wheel toolkit v0.8.0 pin. Shared toolkit fixes belong upstream;
 do not modify vendored implementation merely to change repository branding.
@@ -79,8 +74,7 @@ in this source draft or its package.
 
 The two-file organization diff was independently reviewed and promoted to main
 at `d019d5a` without forcing. Retain inactive motorcycle history and legacy
-installer identity; do not repeat the rename. Review the package-provenance candidate
-separately before any further source integration or package publication.
+installer identity; do not repeat the rename.
 
 Existing verification commands are `tools/tests/Test-SetupUx.ps1` and
 `tools/tests/Test-InstallPackage.ps1`; they use disposable/synthetic fixtures.

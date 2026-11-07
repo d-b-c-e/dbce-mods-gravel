@@ -368,7 +368,7 @@ class FixtureProbe {
     }
     Assert ('lib\toolkit\support\PROVENANCE.json' -in @(Get-PackageFiles)) 'Report provenance must travel with setup.'
     foreach ($relative in Get-PackageFiles) {
-        if ($relative -in @('dist\wheelprobe.exe','lib\toolkit\powershell\DbceWheel.psm1')) { continue }
+        if ($relative -in @('dist\wheelprobe.exe','dist\dinput8.dll','lib\toolkit\powershell\DbceWheel.psm1')) { continue }
         $target = Join-Path $fixture $relative
         [IO.Directory]::CreateDirectory((Split-Path $target -Parent)) | Out-Null
         Copy-Item -LiteralPath (Join-Path $repo $relative) -Destination $target
