@@ -8,7 +8,7 @@ pali/napo reviewed every packet, and every live step ran under an exact-hash GO 
 | Item | State |
 |---|---|
 | Installed build | 0.2.0 package `d91b220` (probe v2, ZIP `139B14CC`), file-only upgrade GO575911 (2026-11-07 00:24Z): `dinput8.dll` `100A7E62`, setup `wheelprobe.exe` `AA3A4216`, receipt `A8B998D6`; `milestone_mod.ini` `4433C2DA` and launcher `4FC2FCA4` unchanged |
-| Rollback | installer backup `gravel/Binaries/Win64/DBCE-Wheel-Backups/20261106-182436-ece373` (previous `e3b8c08` install); external snapshot `artifacts/install-575911/state`; older: `...-085556-18a619`, `artifacts/install-564244/state` |
+| Rollback | installer backup `gravel/Binaries/Win64/DBCE-Wheel-Backups/20261106-182436-ece373` (previous `e3b8c08` install); external snapshot `artifacts/install-575911` (`state.json`, `before/`, `launchers.json`); older: `...-085556-18a619`, `artifacts/install-564244` |
 | Portfolio grid | `camera_sets` and `perspective` ready_for_test (hub `f9d023eb`); `curve` unchanged (no curved renderer) |
 | Owner checklist | hub `docs/owner-checks/2026-11-05-owner-checklist.md` section 12 |
 | main | local commits not pushed (repo is PUBLIC; push only on an explicit owner/coordinator decision) |
