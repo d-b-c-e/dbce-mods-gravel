@@ -1,8 +1,8 @@
-# Gravel handoff — 2026-11-07 (GRV-1 cleanup)
+# Gravel handoff — 2026-11-07 (GRV-2 launch check)
 
-- Built binaries are no longer in git: `build.ps1` writes `build/`; `tools/Package.ps1` builds the commit and puts the binaries in the ZIP's unchanged `dist\` folder.
-- Installed on the rig: `artifacts/milestone-wheel-tools-0.2.0-0ede6ebe` (upgrade changed only `dinput8.dll`, setup `WheelSetup.ps1`, setup `wheelprobe.exe` and the receipt). The DLL is the same code as the previous install; only the PE timestamp and checksum differ.
-- Rollback: installer backup `Win64\DBCE-Wheel-Backups\20261107-055750-a93fa3`; full pre-install snapshot (205 files plus `hashes.json`) in this repo's ignored `build/rig-grv1-20261107-055719`.
-- Launch check not run: Steam showed "Refresh Sign In — this account logged in on another computer". Never sign in or press Exit Steam; that would end the owner's other session.
-- Next: once Steam is signed in here, take the lease, create `%LOCALAPPDATA%\dbce\gravel\ffb-fence.on`, launch 558260, and look for a fresh `[tx]` line in `milestone_mod.log`. Then stop the exact PID (Gravel ignores WM_CLOSE), delete the switch, and run `build/grv1-rig-verify.ps1 -Backup <snapshot>`; only the four files above should differ.
+- Installed on the rig: `artifacts/milestone-wheel-tools-0.2.0-0ede6ebe` (GRV-1). Built binaries are not in git; `build.ps1` writes `build/`, `tools/Package.ps1` puts them in the ZIP's `dist\` folder.
+- Launch check passed 09:05 with Steam signed in: the mod loaded with the force fence on, the wheel read live, and the game reached its main menu after one posted Enter (capture in ignored `build/grv2-menu2.png`). Nothing needed fixing.
+- Restore: the run rewrote `milestone_mod.log` and replaced the 20 `Saved\Config\CrashReportClient\UE4CC-*` folders with one new one (UE4 does this each start). Those were put back, and the 227-file pre-launch snapshot now matches. Saves, `WheelConfig.ini` and Steam's cloud folder were unchanged.
+- Rollback for the install: installer backup `Win64\DBCE-Wheel-Backups\20261107-055750-a93fa3`; full pre-install snapshot in ignored `build/rig-grv1-20261107-055719` (only the four installed files differ from it).
+- Repeat a launch check with the ignored scripts in `build/`: `grv1-rig-backup.ps1 -Out <dir>`, then `grv2-launch.ps1` (creates the fence switch, launches 558260, waits for a fresh `[tx]` line). Stop the exact PID (Gravel ignores WM_CLOSE), delete `%LOCALAPPDATA%\dbce\gravel\ffb-fence.on`, run `grv2-restore.ps1 -Backup <dir>`, then `grv1-rig-verify.ps1 -Backup <dir>`.
 - Camera work (probe v2, live-05 case03) is unchanged; see `2026-11-07-kiri-handoff.md`.
