@@ -7,8 +7,8 @@ pali/napo reviewed every packet, and every live step ran under an exact-hash GO 
 
 | Item | State |
 |---|---|
-| Installed build | 0.2.0 package `e3b8c08` (ZIP `B14BEF43`), file-only install GO564244: `dinput8.dll` `02F52D7B`, `milestone_mod.ini` `4433C2DA` (owner INI + `[camera]` block), receipt `7A359C58`, launcher `4FC2FCA4` |
-| Rollback | installer backup `gravel/Binaries/Win64/DBCE-Wheel-Backups/20261106-085556-18a619`; external snapshot `artifacts/install-564244/state` |
+| Installed build | 0.2.0 package `d91b220` (probe v2, ZIP `139B14CC`), file-only upgrade GO575911 (2026-11-07 00:24Z): `dinput8.dll` `100A7E62`, setup `wheelprobe.exe` `AA3A4216`, receipt `A8B998D6`; `milestone_mod.ini` `4433C2DA` and launcher `4FC2FCA4` unchanged |
+| Rollback | installer backup `gravel/Binaries/Win64/DBCE-Wheel-Backups/20261106-182436-ece373` (previous `e3b8c08` install); external snapshot `artifacts/install-575911/state`; older: `...-085556-18a619`, `artifacts/install-564244/state` |
 | Portfolio grid | `camera_sets` and `perspective` ready_for_test (hub `f9d023eb`); `curve` unchanged (no curved renderer) |
 | Owner checklist | hub `docs/owner-checks/2026-11-05-owner-checklist.md` section 12 |
 | main | local commits not pushed (repo is PUBLIC; push only on an explicit owner/coordinator decision) |
@@ -52,8 +52,10 @@ folders. Keep the worktree until reviewers close their audits; then move `build/
 1. Owner check (checklist section 12); optional: set `eye_distance_mm=660` with the owner's consent.
 2. Per-mounted-camera sets: the old `probe_camera` saturated in a race (stage 4, smoke plan). Probe v2 (`c18621a`,
    pali SOURCE APPROVED 573932, `tools/tests/Test-CameraProbe.ps1` 49 checks) walks PlayerController ->
-   PlayerCameraManager -> ViewTarget/CameraCache and logs raw values only, ending in one `v2 done status=` line. Next:
-   bounded CPU build `-UpdateDist`, package and file-only install, then a NEW stage-4 case whose parser reads v2
-   (including `owner-unresolved`); `build/live-04/case02` cannot be reused. Each step needs review and a kole GO.
+   PlayerCameraManager -> ViewTarget/CameraCache and logs raw values only, ending in one `v2 done status=` line. Built
+   (CPU GO574493 -> `d91b220`), packaged (GO575376) and installed (GO575911); evidence in the release worktree
+   `E:/Source/_work/dbce-mods-gravel-release-c18621a/build/release-cpu`. Next: a NEW short live case whose parser reads
+   v2 (including `owner-unresolved`); `build/live-04/case02` cannot be reused. Run it only when the operator can stay
+   in the run start to finish (kole 573950), or with a peer co-operating the answers.
 3. Curve (curved renderer) remains unstarted work (`2026-11-01-pre-slate-trace.md`).
 4. Live packets should persist Steam log offsets (stage 3 recipe does) and keep the integrated forced-stop cleanup.
