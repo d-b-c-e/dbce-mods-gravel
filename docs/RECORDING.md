@@ -1,5 +1,10 @@
 # Recording development checkpoint — October 7, 2026
 
+Recording and playback are developer tools, not player features (toolkit STD-050): they never appear in
+player docs, the setup tool or the package. This note moved here from the player README on 2026-11-07:
+the current source candidate captures sampled signals; gameplay route playback and its runtime
+qualification are still pending.
+
 Gravel has a source candidate for **sampled signal capture**. It builds and
 passes native fake-COM and producer-to-managed-reader tests. It has not yet been
 installed or qualified in the game. The accepted renderer installation remains

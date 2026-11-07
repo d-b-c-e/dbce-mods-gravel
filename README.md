@@ -16,18 +16,13 @@ The installer finds Gravel through Steam and preserves its saved wheel identity
 on updates. A fresh install asks you to choose if several eligible wheels are
 connected. The setup tool can also be opened directly with `WheelSetup.bat`.
 
-Developer recording work is documented in [Recording](docs/RECORDING.md).
-The current source candidate captures sampled signals; gameplay route playback
-and its runtime qualification are still pending.
-
 ## Development status
 
 Current qualification, installed identity, rollback and ordered next steps are in the
-[November 6 handoff](docs/2026-11-06-kiri-handoff.md) (history: [November 1](docs/2026-11-01-mevu-handoff.md)). Native atomic camera saves and
+[November 7 handoff](docs/2026-11-07-kiri-handoff.md) (history: [November 6](docs/2026-11-06-kiri-handoff.md), [November 1](docs/2026-11-01-mevu-handoff.md)). Native atomic camera saves and
 an opt-in camera probe are source work. In source (not yet built or installed), F7 switches the
 Game / Realistic field-of-view set for all cameras and Shift+F7 is a session-only developer
-comparison; per-mounted-camera sets, curved presentation, in-game F6 and gameplay route
-playback remain unfinished.
+comparison; per-mounted-camera sets, curved presentation and in-game F6 remain unfinished.
 The diagnostic DLL has not been promoted to a new supported package.
 
 ## First drive
@@ -149,8 +144,7 @@ Gravel only. Shared engine technology does not establish title compatibility.
 The MOZA R12 hardware evidence is dated August 30, 2026. The September 19
 0.2.0 deployment has installer and offline fixture evidence, with a drive and
 physical-force acceptance still pending on that package. Native FFB passes
-through unchanged. Normalized rig FFB and recorded gameplay acceptance are not
-established by this release. Triple screens (2026-10-06) were seen in an offline
+through unchanged. Normalized rig FFB is not established by this release. Triple screens (2026-10-06) were seen in an offline
 race on three separate monitors in unattended tests; the owner's rig check is next.
 
 Repository naming may change during portfolio organization. Existing package,
