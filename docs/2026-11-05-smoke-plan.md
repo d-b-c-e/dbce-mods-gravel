@@ -77,8 +77,15 @@ no wheel-feel or FFB claim, telemetry off during the run.
   arrived 56 s after its deadline because the operator session's context was compacted mid-run. With no answer, nothing
   was pressed; integrated forced stop, 183/183 byte-exact restore, natural `remotecache.vdf` change archived, Finalize pass.
   Start the next attempt with fresh operator context.
-- Identity: the next source packet (kole-approved) follows PlayerController -> PlayerCameraManager (`+0x428`) ->
-  ViewTarget/CameraCache instead of scanning candidates.
+- Identity: probe v2 (`c18621a`) follows PlayerController -> PlayerCameraManager -> ViewTarget/CameraCache and logs raw
+  values only; built, packaged and installed (GO574493/575376/575911, `dinput8.dll` `100A7E62`).
+- GO576384 (stage 4b, `build/live-05/case01`, plan `D9387890`, hure co-operating): ABORTED before any input. Steam rotated
+  `logs/cloud_log.txt` at its ~1 MiB limit in the second of the launch, so the runner's Steam-log guard (log shorter than
+  its admission offset) held before adopting the game. Reviewed recovery (`live-05/recovery-576384/Recover-Stop.ps1`,
+  pali 576956, napo 576968, kole 576983): census-adopted exact-identity stop, bootstrap exited by itself, closure
+  quiescent, rotation-aware Steam scan clean (cloud_log continuity by name/length only), frozen Rollback 205/205
+  byte-exact, Finalize ABORTED with the original reason. Probe v2 not exercised. Next: a rotation-robust guard and/or a
+  pre-launch cloud_log size check before the rerun.
 
 ## Live stage 3 result (2026-11-06, GO570432): offline route proven, camera phase not reached
 
