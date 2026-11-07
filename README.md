@@ -325,8 +325,8 @@ the hosted source check runs the same thing, only by explicit `workflow_dispatch
 A 32-bit game needs a 32-bit build. The Forza encoder and the installer's
 Steam/DirectInput helpers are vendored from
 [dbce-wheel-mod-toolkit](https://github.com/d-b-c-e/dbce-wheel-mod-toolkit)
-under `lib/toolkit` (pinned in `lib/toolkit/VERSION`); bump with
-`tools\Sync-Toolkit.ps1 -Version vX.Y.Z -Parts include,powershell`.
+under `lib/toolkit` (pinned in `lib/toolkit/VERSION`); bump with the toolkit's
+`tools\Sync-Toolkit.ps1 -Version vX.Y.Z -Parts include,powershell -Destination lib\toolkit`.
 
 ## Tools
 
@@ -334,7 +334,6 @@ under `lib/toolkit` (pinned in `lib/toolkit/VERSION`); bump with
 |---|---|
 | `WheelSetup.ps1` | bind axes/buttons and preview device input; game owns endpoints/deadzones |
 | `Install.ps1` / `Uninstall.ps1` | install or remove the mod, detecting game and wheel |
-| `tools/Sync-Toolkit.ps1` | re-vendor the toolkit pieces under `lib/toolkit` |
 | `tools/wheelprobe/` | native helper that reads all 128 buttons and 8 axes live |
 | `tools/forza_listen.py` | decode and print the packets — validate without SimHub |
 | `tools/Measure-WheelAxes.ps1` | walks you through each pedal, works out which axis moves and which way, prints the config lines |

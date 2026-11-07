@@ -25,7 +25,7 @@ Portfolio rules: `E:\Source\dbce-project-mgmt\HOW-WE-WORK.md` (read first; it re
 - The setup tool is deployed as `DBCE-Wheel-Setup` beside the exe.
 
 ## Shared code
-`lib/toolkit/` is vendored (Forza encoder `include/forza_packet.h`, `powershell/DbceWheel.psm1`). Change shared code in the toolkit (E:\Source\game-modding\_toolkits\dbce-wheel-mod-toolkit) and re-sync; never edit the vendored copy. Re-sync here: `tools\Sync-Toolkit.ps1 -Version vX.Y.Z -Parts include,powershell`.
+`lib/toolkit/` is vendored (Forza encoder `include/forza_packet.h`, `powershell/DbceWheel.psm1`). Change shared code in the toolkit (E:\Source\game-modding\_toolkits\dbce-wheel-mod-toolkit) and re-sync; never edit the vendored copy. Re-sync from this repo root with the toolkit's script: `pwsh E:\Source\game-modding\_toolkits\dbce-wheel-mod-toolkit\tools\Sync-Toolkit.ps1 -Version vX.Y.Z -Parts include,powershell -Destination lib\toolkit`.
 
 ## Game-specific rules
 - Never use the proxy in a game with kernel anti-cheat. Handling is not changed, so online times are not affected.
