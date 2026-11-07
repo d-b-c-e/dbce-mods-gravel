@@ -1,5 +1,7 @@
 # Gravel handoff — November 6, 2026
 
+> Superseded by 2026-11-07-kiri-handoff.md (clean stop).
+
 Supersedes the "current state" of `2026-11-01-mevu-handoff.md` (kept for history). Owner was away; kole coordinated,
 pali/napo reviewed every packet, and every live step ran under an exact-hash GO with byte-exact restoration.
 
