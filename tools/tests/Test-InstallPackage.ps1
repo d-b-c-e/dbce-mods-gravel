@@ -43,6 +43,15 @@ function Get-Process { @() }
 try {
     Assert (Test-KnownLegacyProxy 'a9940602daee99f3a7139b56230df2b4b6466be80e78b356e9cd93d8ecb531be') 'Verified v0.1.0 identity missing.'
     Assert (-not (Test-KnownLegacyProxy ('a'*64))) 'Unknown legacy identity accepted.'
+    # Golden layout players and install receipts rely on: binaries stay under dist\ in the ZIP and in DBCE-Wheel-Setup.
+    $setupLayout = @('WheelSetup.ps1','WheelSetup.bat','Uninstall.ps1','Uninstall.bat','tools\SetupUx.psm1','tools\InstallPackage.psm1',
+        'lib\toolkit\support\SupportReport.ps1','lib\toolkit\support\SupportReport.cs','lib\toolkit\support\LICENSE',
+        'lib\toolkit\support\PROVENANCE.json','lib\toolkit\powershell\DbceWheel.psm1','dist\wheelprobe.exe','VERSION','QUICKSTART.md',
+        'docs\troubleshooting.md','docs\forza-format.md')
+    $packageLayout = $setupLayout + @('Install.ps1','Install.bat','README.md','LICENSE','dist\dinput8.dll','games\gravel\milestone_mod.ini',
+        'lib\toolkit\VERSION','docs\directinput-sixdof.md','docs\UX-OVERNIGHT-2026-09-16.md')
+    Assert (@(Compare-Object -CaseSensitive -SyncWindow 0 @(Get-SetupPackageFiles) $setupLayout).Count -eq 0) 'Installed setup layout changed.'
+    Assert (@(Compare-Object -CaseSensitive @(Get-PackageFiles) $packageLayout).Count -eq 0 -and @(Get-PackageFiles).Count -eq $packageLayout.Count) 'Package layout changed.'
     Assert-PackageManifest $PackageRoot
     $manifestText = [IO.File]::ReadAllText($manifestPath)
     Remove-Item -LiteralPath $manifestPath
