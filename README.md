@@ -99,6 +99,9 @@ the wheel through XInput would cost you.
 Steering and pedal positions come from the same `GetDeviceState` calls the game
 itself makes; force magnitudes come from the effects it sends to your wheel.
 That is the game's own data in flight, not anything reconstructed.
+The one input change: the bottom 2% of each pedal's travel reads as fully
+released (`pedal_deadzone=` in `[input]`, 0 turns it off), so a pedal that rests
+slightly above 0 cannot hold the car on the start line.
 
 **3. Finds the vehicle state.**
 Speed, RPM, gear and max RPM are read from the game's own dashboard widget through

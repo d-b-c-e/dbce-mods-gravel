@@ -95,6 +95,7 @@ void loadConfig()
     iniStr(ini, "input", "brake", g_cfg.brake, sizeof g_cfg.brake);
     iniStr(ini, "input", "handbrake", g_cfg.handbrake, sizeof g_cfg.handbrake);
     iniStr(ini, "input", "clutch", g_cfg.clutch, sizeof g_cfg.clutch);
+    g_cfg.pedalDeadZone = iniFloat(ini, "input", "pedal_deadzone", 2.0f);
     g_cfg.ffbGain = iniFloat(ini, "ffb", "gain", 1.0f);
     g_cfg.fmodDiscover = iniInt(ini, "fmod", "discover", 1) != 0;
     iniStr(ini, "fmod", "rpm", g_cfg.fmodRpm, sizeof g_cfg.fmodRpm);
@@ -266,6 +267,9 @@ static DWORD WINAPI telemetryThread(LPVOID)
                  g_input.steer.load(), g_input.throttle.load(), g_input.brake.load(), g_input.handbrake.load(),
                  g_input.rawSteer.load(), g_input.rawThr.load(), g_input.rawBrk.load(),
                  cf, pf, rpm, maxRpm, speed, gear, lat, lon, susp, torque);
+            // The physical brake before the dead zone: its resting reading and any spike in the last 5 s.
+            const int lo = g_input.brkLo.exchange(INT32_MAX), hi = g_input.brkHi.exchange(INT32_MIN);
+            if (lo <= hi) logf("[tx] brake raw %d..%d", lo, hi);
         }
         if (ms >= nextDump) { nextDump = ms + 30000; fmodDumpDiscovery(); }
     }

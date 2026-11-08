@@ -34,6 +34,7 @@
 #include <cmath>
 #include <new>
 #include "muted_effect.h"
+#include "pedal_deadzone.h"
 #include "vendor/dinput-proxy/dbce_test_switches.hpp"
 
 static HMODULE g_real = nullptr;
@@ -332,9 +333,42 @@ static void observeState(void *self, DWORD cb, const void *data)
     g_input.observedAt = GetTickCount64();
     ++g_input.reads;
 }
+// The pedal resting dead zone (pedal_deadzone.h, ISS-0039): the one change to what the game reads besides dwDevType.
+// It rewrites the pedal axes of a standard read of the wheel before anything else sees it, so fenced, test injection
+// still overrides it and the read tap sees what the game gets. The physical brake's range of readings goes to the log.
+static double g_pedalDz = 0;
+static std::atomic<int> g_pedalDzLogged{0};
+static void pedalDeadZone(void *self, DWORD cb, void *data)
+{
+    TrackedDev *t = findDev(self);
+    if (!t || !data || (cb != sizeof(DIJOYSTATE) && cb != sizeof(DIJOYSTATE2))) return;
+    if (!t->rangesKnown) learnRanges(t);
+    LONG *ax = (LONG *)data;
+    const int steer = axisIndex(g_cfg.steer), brake = axisIndex(g_cfg.brake);
+    if (brake >= 0 && t->everLive) {
+        const int v = (int)ax[brake];
+        int lo = g_input.brkLo.load(), hi = g_input.brkHi.load();
+        while (v < lo && !g_input.brkLo.compare_exchange_weak(lo, v)) {}
+        while (v > hi && !g_input.brkHi.compare_exchange_weak(hi, v)) {}
+    }
+    if (!(g_pedalDz > 0)) return;
+    const char *pedals[4] = {g_cfg.throttle, g_cfg.brake, g_cfg.clutch, g_cfg.handbrake};
+    int done = 0;
+    for (const char *name : pedals) {
+        const int i = axisIndex(name);
+        if (i < 0 || i == steer || (done >> i & 1)) continue;
+        done |= 1 << i;
+        const LONG before = ax[i];
+        ax[i] = pedalRestDeadZone(before, t->lo[i], t->hi[i], g_pedalDz);
+        if (t->everLive && ax[i] == t->lo[i] && before != t->lo[i] && !(g_pedalDzLogged.fetch_or(1 << i) >> i & 1))
+            logf("[input] pedal dead zone: %s read %ld (range %ld..%ld), passed to the game as released", name, (long)before,
+                 (long)t->lo[i], (long)t->hi[i]);
+    }
+}
 static HRESULT STDMETHODCALLTYPE HookGetState(void *self, DWORD cb, LPVOID data, bool uni)
 {
     HRESULT hr = ((PFN_GetState)(uni ? g_oGetStateW : g_oGetStateA))(self, cb, data);
+    if (SUCCEEDED(hr)) pedalDeadZone(self, cb, data);
     if (SUCCEEDED(hr) && !g_fence) observeState(self, cb, data);
     return hr;
 }
@@ -769,6 +803,11 @@ void proxyInit()
     if (g_inited.exchange(true)) return;
     InitializeCriticalSection(&g_devLock);
     loadConfig();
+    g_pedalDz = pedalDeadZoneFraction(g_cfg.pedalDeadZone);
+    if (g_pedalDz > 0)
+        logf("[input] pedal dead zone %.1f%% of the range at the released end: throttle %s, brake %s, clutch %s, handbrake %s",
+             g_pedalDz * 100, g_cfg.throttle, g_cfg.brake, g_cfg.clutch[0] ? g_cfg.clutch : "-", g_cfg.handbrake);
+    else logf("[input] pedal dead zone off (pedal_deadzone=0)");
     recordingInit();
     fenceInit();
     tripleReport();

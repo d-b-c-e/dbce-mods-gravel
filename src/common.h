@@ -9,8 +9,8 @@
 //   telemetry.cpp  60 Hz thread folding all of it into Forza "Data Out" UDP
 //   triple.cpp     triple screens through the engine's emulated stereo device
 //
-// Everything a game can read is left untouched except dwDevType. All taps are
-// observe-only.
+// Everything a game can read is left untouched except dwDevType and the pedal
+// resting dead zone (pedal_deadzone.h). All taps are observe-only.
 #pragma once
 #define WIN32_LEAN_AND_MEAN
 #define DIRECTINPUT_VERSION 0x0800
@@ -42,6 +42,7 @@ struct Config {
     char     brake[12]    = "lRz";
     char     handbrake[12]= "slider0";
     char     clutch[12]   = "";
+    float    pedalDeadZone = 2.0f;        // percent of each pedal's range read as released (0 = off; pedal_deadzone.h)
     // [ffb]
     float    ffbGain      = 1.0f;         // scale applied to normalised force
     // [fmod]
@@ -99,6 +100,7 @@ struct InputState {
     std::atomic<float> handbrake{0};
     std::atomic<uint32_t> buttons{0}; // first 32 as bitmask (for the log only)
     std::atomic<int>   rawSteer{0}, rawThr{0}, rawBrk{0};   // last raw axis values, for calibration
+    std::atomic<int>   brkLo{INT32_MAX}, brkHi{INT32_MIN};     // physical brake's lowest/highest raw read since the last status line
     std::atomic<bool>  live{false};   // a GetDeviceState has succeeded
     std::atomic<uint32_t> reads{0};
 };
