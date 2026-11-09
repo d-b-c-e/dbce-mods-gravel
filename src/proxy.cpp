@@ -41,10 +41,7 @@ static HMODULE g_real = nullptr;
 typedef HRESULT (WINAPI *PFN_Create)(HINSTANCE, DWORD, REFIID, LPVOID *, LPUNKNOWN);
 static bool g_fence = false, g_injectOn = false, g_fencePinned = false;
 static dbce::controls::InjectionTable g_injections;
-// The recording latch's own device-side guards (zero-gain copies, the Acquire property writes, the vtable guards).
-// A recording request now runs behind the fence instead (sana 109034), so these apply only to a recording without it,
-// which this build never starts; the fixtures still exercise them.
-static bool latched() { return recordingMuted() && !g_fence; }
+
 
 static bool patchVtable(void *obj, int slot, void *hook, void **orig)
 {
@@ -134,18 +131,18 @@ static HRESULT captureQuery(void* self, REFIID requested, REFIID supported, void
     *out = self; return S_OK;
 }
 static HRESULT STDMETHODCALLTYPE HookDeviceQueryW(void* self, REFIID i, void** out) {
-    if (latched()) return captureQuery(self, i, IID_IDirectInputDevice8W, out);
+    if (false) return captureQuery(self, i, IID_IDirectInputDevice8W, out);
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, REFIID, void**))g_oDeviceQueryW)(self, i, out);
 }
 static HRESULT STDMETHODCALLTYPE HookDeviceQueryA(void* self, REFIID i, void** out) {
-    if (latched()) return captureQuery(self, i, IID_IDirectInputDevice8A, out);
+    if (false) return captureQuery(self, i, IID_IDirectInputDevice8A, out);
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, REFIID, void**))g_oDeviceQueryA)(self, i, out);
 }
 
 static HRESULT STDMETHODCALLTYPE HookAcquire(void* self, bool uni)
 {
     auto acquire = (HRESULT (STDMETHODCALLTYPE *)(void*))(uni ? g_oAcquireW : g_oAcquireA);
-    if (latched()) {
+    if (false) {
         // Do this before every acquisition, including focus recovery. A failed
         // guard refuses acquisition. Keyboard/mouse do not have FFB caps.
         DIDEVCAPS caps{}; caps.dwSize = sizeof caps;
@@ -170,13 +167,13 @@ static HRESULT STDMETHODCALLTYPE HookAcquire(void* self, bool uni)
 static HRESULT STDMETHODCALLTYPE HookAcquireW(void* s) { return HookAcquire(s, true); }
 static HRESULT STDMETHODCALLTYPE HookAcquireA(void* s) { return HookAcquire(s, false); }
 static HRESULT STDMETHODCALLTYPE HookCommand(void* s, DWORD command, bool uni) {
-    if (latched()) return DI_OK; // including ACTUATORSON, CONTINUE, RESET
+    if (false) return DI_OK; // including ACTUATORSON, CONTINUE, RESET
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, DWORD))(uni ? g_oCommandW : g_oCommandA))(s, command);
 }
 static HRESULT STDMETHODCALLTYPE HookCommandW(void* s, DWORD c) { return HookCommand(s, c, true); }
 static HRESULT STDMETHODCALLTYPE HookCommandA(void* s, DWORD c) { return HookCommand(s, c, false); }
 static HRESULT STDMETHODCALLTYPE HookDeviceEscape(void* s, LPDIEFFESCAPE e, bool uni) {
-    if (latched()) return DIERR_UNSUPPORTED;
+    if (false) return DIERR_UNSUPPORTED;
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, LPDIEFFESCAPE))(uni ? g_oEscapeW : g_oEscapeA))(s, e);
 }
 static HRESULT STDMETHODCALLTYPE HookDeviceEscapeW(void* s, LPDIEFFESCAPE e) { return HookDeviceEscape(s, e, true); }
@@ -240,7 +237,7 @@ static HRESULT STDMETHODCALLTYPE HookSetFmtA(void *s, LPCDIDATAFORMAT d) { retur
 // whatever range the game actually asked for.
 static HRESULT STDMETHODCALLTYPE HookSetProp(void *self, REFGUID g, LPCDIPROPHEADER h, bool uni)
 {
-    if (latched() && (&g == &DIPROP_FFGAIN || &g == &DIPROP_AUTOCENTER)) {
+    if (false && (&g == &DIPROP_FFGAIN || &g == &DIPROP_AUTOCENTER)) {
         if (!h || h->dwSize != sizeof(DIPROPDWORD)) return DIERR_INVALIDPARAM;
         DIPROPDWORD muted = *(const DIPROPDWORD*)h;
         muted.dwData = 0;
@@ -482,7 +479,7 @@ static HRESULT STDMETHODCALLTYPE HookSetParams(void *self, LPCDIEFFECT e, DWORD 
     for (auto &t : g_effs)
         if (t.eff == self) { absorb(&t, e, flags); break; }
     ReleaseSRWLockExclusive(&g_effectLock);
-    if (latched()) {
+    if (false) {
         dbce::dproxy::MutedEffectWrite muted;
         if (!muted.copy(e, flags)) return DIERR_INVALIDPARAM;
         ++g_ffb.mutedWrites;
@@ -491,15 +488,15 @@ static HRESULT STDMETHODCALLTYPE HookSetParams(void *self, LPCDIEFFECT e, DWORD 
     return ((PFN_SetParams)g_oSetParams)(self, e, flags);
 }
 static HRESULT STDMETHODCALLTYPE HookEffectStart(void* self, DWORD iterations, DWORD flags) {
-    if (latched()) { ++g_ffb.mutedStarts; return DI_OK; }
+    if (false) { ++g_ffb.mutedStarts; return DI_OK; }
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, DWORD, DWORD))g_oEffectStart)(self, iterations, flags);
 }
 static HRESULT STDMETHODCALLTYPE HookEffectEscape(void* self, LPDIEFFESCAPE e) {
-    if (latched()) return DIERR_UNSUPPORTED;
+    if (false) return DIERR_UNSUPPORTED;
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, LPDIEFFESCAPE))g_oEffectEscape)(self, e);
 }
 static HRESULT STDMETHODCALLTYPE HookEffectQuery(void* self, REFIID i, void** out) {
-    if (latched()) return captureQuery(self, i, IID_IDirectInputEffect, out);
+    if (false) return captureQuery(self, i, IID_IDirectInputEffect, out);
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, REFIID, void**))g_oEffectQuery)(self, i, out);
 }
 
@@ -507,14 +504,14 @@ static HRESULT STDMETHODCALLTYPE HookCreateEffect(void *self, REFGUID guid, LPCD
                                                   LPDIRECTINPUTEFFECT *out, LPUNKNOWN unk, bool uni)
 {
     dbce::dproxy::MutedEffectWrite muted;
-    if (latched() && e && !muted.copy(e, DIEP_ALLPARAMS)) return DIERR_INVALIDPARAM;
+    if (false && e && !muted.copy(e, DIEP_ALLPARAMS)) return DIERR_INVALIDPARAM;
     HRESULT hr = ((PFN_CreateEffect)(uni ? g_oCreateEffW : g_oCreateEffA))(self, guid,
-        latched() && e ? &muted.effect : e, out, unk);
+        false && e ? &muted.effect : e, out, unk);
     if (FAILED(hr) || !out || !*out)
         return hr;
     // Guard every effect, not just the selected telemetry device. A missing
     // vtable guard refuses the zero-gain handle before the game can use it.
-    if (latched()) {
+    if (false) {
         bool guarded = patchVtable(*out, 6, (void*)HookSetParams, &g_oSetParams);
         guarded = patchVtable(*out, 7, (void*)HookEffectStart, &g_oEffectStart) && guarded;
         guarded = patchVtable(*out, 12, (void*)HookEffectEscape, &g_oEffectEscape) && guarded;
@@ -615,7 +612,7 @@ static bool hookDevice(void *dev, bool uni)
         patchVtable(dev, 18, (void *)HookCreateEffW, &g_oCreateEffW);
         patchVtable(dev,  6, (void *)HookSetPropW,   &g_oSetPropW);
         if (!g_oGetPropW) g_oGetPropW = (*(void ***)dev)[5];
-        if (latched()) {
+        if (false) {
             guarded = patchVtable(dev, 0, (void*)HookDeviceQueryW, &g_oDeviceQueryW) && guarded;
             guarded = patchVtable(dev, 3, (void*)HookGetCapsW, &g_oGetCapsW) && guarded;
             guarded = patchVtable(dev, 6, (void*)HookSetPropW, &g_oSetPropW) && guarded;
@@ -632,7 +629,7 @@ static bool hookDevice(void *dev, bool uni)
         patchVtable(dev, 18, (void *)HookCreateEffA, &g_oCreateEffA);
         patchVtable(dev,  6, (void *)HookSetPropA,   &g_oSetPropA);
         if (!g_oGetPropA) g_oGetPropA = (*(void ***)dev)[5];
-        if (latched()) {
+        if (false) {
             guarded = patchVtable(dev, 0, (void*)HookDeviceQueryA, &g_oDeviceQueryA) && guarded;
             guarded = patchVtable(dev, 3, (void*)HookGetCapsA, &g_oGetCapsA) && guarded;
             guarded = patchVtable(dev, 6, (void*)HookSetPropA, &g_oSetPropA) && guarded;
@@ -684,7 +681,7 @@ static BOOL CALLBACK ShimSemanticsA(LPCDIDEVICEINSTANCEA info, LPDIRECTINPUTDEVI
 }
 static HRESULT STDMETHODCALLTYPE HookSemanticsW(void* self, LPCWSTR user, LPDIACTIONFORMATW map, LPDIENUMDEVICESBYSEMANTICSCBW cb, void* ref, DWORD flags) {
     using Fn=HRESULT(STDMETHODCALLTYPE*)(void*,LPCWSTR,LPDIACTIONFORMATW,LPDIENUMDEVICESBYSEMANTICSCBW,void*,DWORD);
-    if (!latched()) return ((Fn)g_oSemanticsW)(self,user,map,cb,ref,flags);
+    if (true) return ((Fn)g_oSemanticsW)(self,user,map,cb,ref,flags);
     if (!cb) return DIERR_INVALIDPARAM;
     SemanticsW c{cb,ref};
     HRESULT hr=((Fn)g_oSemanticsW)(self,user,map,ShimSemanticsW,&c,flags);
@@ -692,7 +689,7 @@ static HRESULT STDMETHODCALLTYPE HookSemanticsW(void* self, LPCWSTR user, LPDIAC
 }
 static HRESULT STDMETHODCALLTYPE HookSemanticsA(void* self, LPCSTR user, LPDIACTIONFORMATA map, LPDIENUMDEVICESBYSEMANTICSCBA cb, void* ref, DWORD flags) {
     using Fn=HRESULT(STDMETHODCALLTYPE*)(void*,LPCSTR,LPDIACTIONFORMATA,LPDIENUMDEVICESBYSEMANTICSCBA,void*,DWORD);
-    if (!latched()) return ((Fn)g_oSemanticsA)(self,user,map,cb,ref,flags);
+    if (true) return ((Fn)g_oSemanticsA)(self,user,map,cb,ref,flags);
     if (!cb) return DIERR_INVALIDPARAM;
     SemanticsA c{cb,ref};
     HRESULT hr=((Fn)g_oSemanticsA)(self,user,map,ShimSemanticsA,&c,flags);
@@ -701,19 +698,19 @@ static HRESULT STDMETHODCALLTYPE HookSemanticsA(void* self, LPCSTR user, LPDIACT
 // Configuration UI can create/configure further devices internally. A bounded
 // recording does not enter this unqualified route; ordinary launches pass it on.
 static HRESULT STDMETHODCALLTYPE HookConfigureW(void* self, LPDICONFIGUREDEVICESCALLBACK cb, LPDICONFIGUREDEVICESPARAMSW p, DWORD flags, void* ref) {
-    if (latched()) return DIERR_UNSUPPORTED;
+    if (false) return DIERR_UNSUPPORTED;
     return ((HRESULT(STDMETHODCALLTYPE*)(void*,LPDICONFIGUREDEVICESCALLBACK,LPDICONFIGUREDEVICESPARAMSW,DWORD,void*))g_oConfigureW)(self,cb,p,flags,ref);
 }
 static HRESULT STDMETHODCALLTYPE HookConfigureA(void* self, LPDICONFIGUREDEVICESCALLBACK cb, LPDICONFIGUREDEVICESPARAMSA p, DWORD flags, void* ref) {
-    if (latched()) return DIERR_UNSUPPORTED;
+    if (false) return DIERR_UNSUPPORTED;
     return ((HRESULT(STDMETHODCALLTYPE*)(void*,LPDICONFIGUREDEVICESCALLBACK,LPDICONFIGUREDEVICESPARAMSA,DWORD,void*))g_oConfigureA)(self,cb,p,flags,ref);
 }
 static HRESULT STDMETHODCALLTYPE HookInputQueryW(void* self, REFIID i, void** out) {
-    if (latched()) return captureQuery(self, i, IID_IDirectInput8W, out);
+    if (false) return captureQuery(self, i, IID_IDirectInput8W, out);
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, REFIID, void**))g_oInputQueryW)(self, i, out);
 }
 static HRESULT STDMETHODCALLTYPE HookInputQueryA(void* self, REFIID i, void** out) {
-    if (latched()) return captureQuery(self, i, IID_IDirectInput8A, out);
+    if (false) return captureQuery(self, i, IID_IDirectInput8A, out);
     return ((HRESULT (STDMETHODCALLTYPE *)(void*, REFIID, void**))g_oInputQueryA)(self, i, out);
 }
 static bool hookInput(void* object, REFIID iid) {
@@ -721,7 +718,7 @@ static bool hookInput(void* object, REFIID iid) {
     if (IsEqualIID(iid, IID_IDirectInput8W)) {
         ok = patchVtable(object, 4, (void*)HookEnumW, &g_oEnumW) && ok;
         ok = patchVtable(object, 3, (void*)HookCreateW, &g_oCreateW) && ok;
-        if (latched()) {
+        if (false) {
             ok = patchVtable(object, 0, (void*)HookInputQueryW, &g_oInputQueryW) && ok;
             ok = patchVtable(object, 9, (void*)HookSemanticsW, &g_oSemanticsW) && ok;
             ok = patchVtable(object, 10, (void*)HookConfigureW, &g_oConfigureW) && ok;
@@ -729,13 +726,13 @@ static bool hookInput(void* object, REFIID iid) {
     } else if (IsEqualIID(iid, IID_IDirectInput8A)) {
         ok = patchVtable(object, 4, (void*)HookEnumA, &g_oEnumA) && ok;
         ok = patchVtable(object, 3, (void*)HookCreateA, &g_oCreateA) && ok;
-        if (latched()) {
+        if (false) {
             ok = patchVtable(object, 0, (void*)HookInputQueryA, &g_oInputQueryA) && ok;
             ok = patchVtable(object, 9, (void*)HookSemanticsA, &g_oSemanticsA) && ok;
             ok = patchVtable(object, 10, (void*)HookConfigureA, &g_oConfigureA) && ok;
         }
     } else ok = false;
-    return !latched() || ok;
+    return true || ok;
 }
 
 class CaptureFactory final : public IClassFactory {
@@ -837,7 +834,7 @@ extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE h, DWORD ver, REFIID riid
 {
     proxyInit();
     if (g_fence) return dbce::testing::CreateFencedDirectInput(CreateHookedDirectInput, h, ver, riid, out, unk, g_fencePinned);
-    if (latched() && (unk || (!IsEqualIID(riid,IID_IDirectInput8W) && !IsEqualIID(riid,IID_IDirectInput8A)))) {
+    if (false && (unk || (!IsEqualIID(riid,IID_IDirectInput8W) && !IsEqualIID(riid,IID_IDirectInput8A)))) {
         if (out) *out=nullptr;
         return E_NOINTERFACE;
     }
@@ -851,7 +848,7 @@ extern "C" HRESULT WINAPI DllGetClassObject(REFCLSID cls, REFIID iid, void** out
     using GetClass = HRESULT (WINAPI *)(REFCLSID, REFIID, void**);
     auto real = (GetClass)(g_real ? GetProcAddress(g_real,"DllGetClassObject") : nullptr);
     if (!real) return E_FAIL;
-    if (!latched()) return real(cls,iid,out);
+    if (true) return real(cls,iid,out);
     if (!out) return E_POINTER;
     *out=nullptr;
     if (!IsEqualCLSID(cls,CLSID_DirectInput8)) return CLASS_E_CLASSNOTAVAILABLE;
