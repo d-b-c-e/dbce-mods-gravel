@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "kind": "shared-native-binding-editor",
+  "productHeaders": "de17086859dd3c1e530f18d07d72f14c2694e7a4",
+  "qualifiedFixture": "a817ed7c8ade178edafdc1b2b1f2a3f928e8c41b",
+  "baseToolkit": "db3b6a2b109bdca09bbaecb061a3eaebc17b6fbf",
+  "policySources": [
+    "dotnet/Dbce.Wheel.Input/BindingCapture.cs",
+    "dotnet/Dbce.Wheel.Input/BindingCaptureFlow.cs",
+    "dotnet/Dbce.Wheel.Input/BindingEditorPolicy.cs",
+    "dotnet/Dbce.Wheel.Input/ControlProfileDocument.cs",
+    "dotnet/Dbce.Wheel.Input/ControlProfileDraft.cs"
+  ],
+  "files": {
+    "dbce_binding_editor.hpp": "868BB96B04C2B4347DA5D383990934A2CF02A133313F79CF3E7EB4620245CAB8",
+    "dbce_controls_store_win.hpp": "E3F979435048E52A73F3FE541F86FF5E4E35C7E76339B89FD3B7BF1B41F3582C",
+    "dbce_controls.hpp": "6002B403122EDA689BC4413944FD5D30631566FE61F9BE3E37D520EA4A90C870"
+  },
+  "checks": 42,
+  "architecture": "x64",
+  "compiler": "MSVC 14.44 C++17 /W4 /WX",
+  "nativeDllRebuiltOrLoaded": false,
+  "deviceOpened": false
+}

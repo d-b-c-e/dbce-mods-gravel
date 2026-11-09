@@ -61,8 +61,10 @@ struct InjectReader {
 inline DWORD WINAPI injectReaderThread(LPVOID p)
 {
     auto *r = (InjectReader *)p;
-    FILETIME created, x1, x2, x3, last{};
-    GetProcessTimes(GetCurrentProcess(), &created, &x1, &x2, &x3);
+    FILETIME created{}, x1{}, x2{}, x3{}, last{};
+    if (!GetProcessTimes(GetCurrentProcess(), &created, &x1, &x2, &x3)) {
+        fence::logf("inject: process birth unavailable; reader refused"); delete r; return 0;
+    }
     fence::logf("inject: reading %s (commands newer than this process)%s", r->path.c_str(), r->haveControls ? "; action ids from [Controls]" : "; no [Controls]: raw commands only");
     for (;;) {
         Sleep(40);

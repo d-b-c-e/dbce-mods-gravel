@@ -36,6 +36,9 @@ inline const char *const kActions[] = {
     "confirm", "back", "start", "select", "navUp", "navDown", "navLeft", "navRight",
     "camera", "lookBack", "reset", "horn", "modMenu", "muteFfb",
     "gear1", "gear2", "gear3", "gear4", "gear5", "gear6", "gear7", "gear8",
+    // Append only: the original 31 indexes are used by saved recordings and ABI 2.
+    "cameraForward", "cameraBack", "cameraUp", "cameraDown", "cameraLeft", "cameraRight",
+    "cameraTiltDown", "cameraTiltUp", "cameraZoomIn", "cameraZoomOut", "cameraReset",
 };
 
 inline Shape shapeOf(const std::string &action)

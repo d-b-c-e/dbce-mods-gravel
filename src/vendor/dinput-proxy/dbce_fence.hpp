@@ -3,8 +3,9 @@
 //
 // The game never holds a real DirectInput or device object. FencedDirectInput wraps the interface, and every device it
 // creates comes back as a FencedDevice:
-//  - forwarded unchanged: capabilities, objects, the readable properties, acquire, state, data, formats, cooperative
-//    level, object and device information, effect enumeration and information, poll, action maps;
+//  - forwarded unchanged: capabilities, objects, the readable properties, acquire, state, data, formats, the cooperative
+//    level (controllers in the background, see SetCooperativeLevel), object and device information, effect enumeration and information, poll, action maps;
+//    opt-in Settings::panelOpen suppresses input after injection/shaping and before observers;
 //  - never forwarded: CreateEffect returns a software sink effect that keeps the game's parameters and never touches the
 //    device (Start, Stop, SetParameters, Download, Unload, Escape all stay in the sink); SendForceFeedbackCommand,
 //    Escape, SendDeviceData, effect files, RunControlPanel and Initialize; the force gain property;
@@ -19,8 +20,9 @@
 // Test injection (dbce_inject_table.hpp) is delivered in FencedDevice::GetDeviceState, keyed by the instance GUID that
 // DirectInput reports for the created device. Buffered GetDeviceData reads are forwarded without injection.
 // Pedal rest shaping (dbce_shape_state.hpp), when a proxy sets one, runs in the same place after injection. An observer
-// (Settings::observe), when a proxy sets one, then sees the final standard-format state: what the game receives. An
+// (Settings::observe), when a proxy sets one, then sees the final standard-format state after optional panel suppression. An
 // effect observer (Settings::observeEffect) sees the game's original force requests as the software effects keep them.
+// A macro recorder (Settings::recorder, dbce_macro_record.hpp) writes that same final state's changes while record.on exists.
 #pragma once
 #ifndef DIRECTINPUT_VERSION
 #define DIRECTINPUT_VERSION 0x0800
@@ -34,6 +36,8 @@
 #include <vector>
 #include "../controls/dbce_inject_table.hpp"
 #include "dbce_joyformat.hpp"
+#include "dbce_macro_record.hpp"
+#include "dbce_input_suppression.hpp"
 #include "dbce_shape_state.hpp"
 
 #pragma comment(lib, "dxguid.lib")
@@ -46,11 +50,12 @@ enum class EffectEvent { Created, Parameters, Start, Stop, Released };
 // Process-wide settings, set once before DirectInput8Create is answered.
 struct Settings {
     void (*log)(const char *line) = nullptr;
+    bool (*panelOpen)() = nullptr;   // opt-in input suppression; set once, nullptr leaves all reads unchanged
     dbce::controls::InjectionTable *injections = nullptr;   // nullptr: no injection
     const dbce::controls::ShapeTable *shapes = nullptr;     // nullptr: no pedal shaping (set once, complete, never freed)
     // What the game receives, for a proxy that observes its own reads (Gravel's telemetry, sana 107988): called on the
     // reading thread after a successful GetDeviceState in a standard format (format 1 with a DIJOYSTATE, 2 with a
-    // DIJOYSTATE2), once injection and shaping are applied. `device` is the wrapped device, for identity only; `state` is
+    // DIJOYSTATE2), once injection, shaping and optional panel suppression are applied. `device` is the wrapped device, for identity only; `state` is
     // borrowed and read-only for the call. Never called for a failed, null, custom-format or mis-sized read. nullptr: none.
     void (*observe)(const void *device, int format, DWORD cb, const void *state) = nullptr;
     // The game's original force requests, for a proxy that records them (Gravel's signal capture, sana 109034): called on
@@ -62,6 +67,7 @@ struct Settings {
     // to a device, and a throwing observer changes no result. nullptr: none.
     void (*observeEffect)(const void *device, const void *effect, REFGUID type, EffectEvent event, LPCDIEFFECT params,
                           DWORD flags, DWORD value) = nullptr;
+    dbce::macro::Recorder *recorder = nullptr;   // nullptr: no macro recording (set once, never freed)
 };
 inline Settings &settings() { static Settings s; return s; }
 
@@ -77,6 +83,13 @@ inline void logf(const char *fmt, ...)
 }
 // Bounded per call site: the first 20, then every 1000th.
 inline bool sample(volatile LONG &n) { LONG k = InterlockedIncrement(&n); return k <= 20 || k % 1000 == 0; }
+
+inline bool panelOpen()
+{
+    if (!settings().panelOpen) return false;
+    try { return settings().panelOpen(); }
+    catch (...) { static volatile LONG n; if (sample(n)) logf("fence: panel-open predicate threw; input suppressed"); return true; }
+}
 
 inline std::string guidText(const GUID &g)
 {
@@ -185,7 +198,7 @@ struct FencedDevice final : I {
     I *real;
     volatile LONG refs = 1;
     std::string instance;   // "{...}" lowercase, from GetDeviceInfo
-    volatile LONG format = 0;   // 1 c_dfDIJoystick, 2 c_dfDIJoystick2, 0 any other (injection is delivered only into 1 and 2)
+    volatile LONG format = 0;   // input::format; injection/shaping/observer accept only exact joystick 1/2
     bool formatWarned = false;
     FencedDevice(I *r, const std::string &inst) : real(r), instance(inst) {}
     static HRESULT refuse(const char *what) { static volatile LONG n; if (sample(n)) logf("fence: %s refused", what); return DIERR_UNSUPPORTED; }
@@ -228,6 +241,16 @@ struct FencedDevice final : I {
         mn = r.lMin; mx = r.lMax;
         return true;
     }
+    static dbce::controls::StateView view(DWORD cb, LPVOID data)   // a standard-format read (DIJOYSTATE or DIJOYSTATE2)
+    {
+        auto *s = (DIJOYSTATE *)data;
+        dbce::controls::StateView v;
+        v.axes = (long *)&s->lX;
+        v.buttons = cb == sizeof(DIJOYSTATE2) ? ((DIJOYSTATE2 *)data)->rgbButtons : s->rgbButtons;
+        v.buttonCount = cb == sizeof(DIJOYSTATE2) ? 128 : 32;
+        v.povs = cb == sizeof(DIJOYSTATE2) ? (unsigned long *)((DIJOYSTATE2 *)data)->rgdwPOV : (unsigned long *)s->rgdwPOV;
+        return v;
+    }
     void inject(dbce::controls::InjectionTable &inj, DWORD cb, LPVOID data)
     {
         const bool standard = (format == 1 && cb == sizeof(DIJOYSTATE)) || (format == 2 && cb == sizeof(DIJOYSTATE2));
@@ -238,12 +261,7 @@ struct FencedDevice final : I {
             }
             return;
         }
-        auto *s = (DIJOYSTATE *)data;
-        dbce::controls::StateView v;
-        v.axes = (long *)&s->lX;
-        v.buttons = cb == sizeof(DIJOYSTATE2) ? ((DIJOYSTATE2 *)data)->rgbButtons : s->rgbButtons;
-        v.buttonCount = cb == sizeof(DIJOYSTATE2) ? 128 : 32;
-        v.povs = cb == sizeof(DIJOYSTATE2) ? (unsigned long *)((DIJOYSTATE2 *)data)->rgdwPOV : (unsigned long *)s->rgdwPOV;
+        dbce::controls::StateView v = view(cb, data);
         std::vector<std::string> lines;
         inj.apply(instance, v, GetTickCount64(), [this](int axis, long &mn, long &mx) { return axisRange(axis, mn, mx); }, lines);
         for (auto &l : lines) logf("%s", l.c_str());
@@ -257,24 +275,46 @@ struct FencedDevice final : I {
         if (const auto *shapes = settings().shapes)
             dbce::shape::applyToState(*shapes, instance, format, cb, data, [this](int axis, long &mn, long &mx) { return axisRange(axis, mn, mx); },
                 [](const dbce::controls::PedalShape &s, dbce::controls::ShapeMiss m, long mn, long mx) { logf("%s", dbce::shape::firstLine(s, m, mn, mx).c_str()); });
+        if (panelOpen()) dbce::input::suppressState((int)format, cb, data);
+        const LONG f = format;
+        const bool standard = (f == 1 && cb == sizeof(DIJOYSTATE)) || (f == 2 && cb == sizeof(DIJOYSTATE2));
         if (const auto observe = settings().observe) {
-            const LONG f = format;
-            if ((f == 1 && cb == sizeof(DIJOYSTATE)) || (f == 2 && cb == sizeof(DIJOYSTATE2))) {
+            if (standard) {
                 try { observe(real, (int)f, cb, data); }
                 catch (...) { static volatile LONG n; if (sample(n)) logf("fence: a state observer threw; ignored"); }
             }
         }
+        if (auto *rec = settings().recorder) {
+            if (standard) {
+                try { rec->sample(instance, view(cb, data), GetTickCount64(), [this](int axis, long &mn, long &mx) { return axisRange(axis, mn, mx); }); }
+                catch (...) { static volatile LONG n; if (sample(n)) logf("fence: the macro recorder threw; ignored"); }
+            }
+        }
         return hr;
     }
-    STDMETHODIMP GetDeviceData(DWORD n, LPDIDEVICEOBJECTDATA d, LPDWORD k, DWORD f) override { return real->GetDeviceData(n, d, k, f); }
+    STDMETHODIMP GetDeviceData(DWORD n, LPDIDEVICEOBJECTDATA d, LPDWORD k, DWORD f) override
+    {
+        const HRESULT hr = real->GetDeviceData(n, d, k, f);
+        if (SUCCEEDED(hr) && k && panelOpen()) dbce::input::suppressData(k);
+        return hr;
+    }
     STDMETHODIMP SetDataFormat(LPCDIDATAFORMAT f) override
     {
         HRESULT hr = real->SetDataFormat(f);
-        if (SUCCEEDED(hr)) InterlockedExchange(&format, standardFormat(f));
+        if (SUCCEEDED(hr)) InterlockedExchange(&format, dbce::input::format(f));
         return hr;
     }
     STDMETHODIMP SetEventNotification(HANDLE e) override { return real->SetEventNotification(e); }
-    STDMETHODIMP SetCooperativeLevel(HWND w, DWORD f) override { return real->SetCooperativeLevel(w, f); }
+    // Unattended tests: a fenced game controller is read in the background, so injection and the real wheel still reach
+    // a game whose window lost focus (rig runners cannot always give it the foreground). Keyboard and mouse keep the
+    // game's choice; if the driver refuses background access, the game's own flags are used.
+    STDMETHODIMP SetCooperativeLevel(HWND w, DWORD f) override {
+        DIDEVCAPS caps = {sizeof caps};
+        const BYTE type = (f & DISCL_FOREGROUND) && SUCCEEDED(real->GetCapabilities(&caps)) ? GET_DIDEVICE_TYPE(caps.dwDevType) : 0;
+        if ((f & DISCL_FOREGROUND) && type && type != DI8DEVTYPE_KEYBOARD && type != DI8DEVTYPE_MOUSE &&
+            SUCCEEDED(real->SetCooperativeLevel(w, (f & ~DWORD(DISCL_FOREGROUND)) | DISCL_BACKGROUND))) return DI_OK;
+        return real->SetCooperativeLevel(w, f);
+    }
     STDMETHODIMP GetObjectInfo(typename T::ObjInst o, DWORD obj, DWORD how) override { return real->GetObjectInfo(o, obj, how); }
     STDMETHODIMP GetDeviceInfo(typename T::DevInst d) override { return real->GetDeviceInfo(d); }
     STDMETHODIMP RunControlPanel(HWND, DWORD) override { return refuse("device RunControlPanel"); }

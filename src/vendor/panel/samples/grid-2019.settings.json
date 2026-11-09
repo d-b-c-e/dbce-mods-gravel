@@ -1,0 +1,65 @@
+{
+  "settings": {
+    "product": "GRID (2019) Wheel Mod",
+    "version": "0.2.26",
+    "modPage": "https://github.com/d-b-c-e/dbce-mods-grid-2019",
+    "keys": "F6 settings · F8 force feedback off · F7 camera view",
+    "pages": {
+      "controls": [
+        { "id": "controls.status", "kind": "status", "text": "Set up your wheel in the game's Controls menu." },
+        { "id": "controls.menu-dpad", "kind": "toggle", "label": "Wheel D-pad in menus", "default": true,
+          "help": "Use your wheel's D-pad in the game's menus." }
+      ],
+      "ffb": [
+        { "id": "ffb.status", "kind": "status", "text": "Waiting for the game to create its effects" },
+        { "id": "ffb.enabled", "kind": "toggle", "label": "Force feedback", "default": true, "help": "F8 turns it off at any time." },
+        { "id": "ffb.strength", "kind": "percent", "label": "Strength", "default": 50,
+          "help": "50% is the game's own strength; 100% doubles it." },
+        { "id": "ffb.session", "kind": "status", "label": "This session", "text": "Game-provided FFB" },
+        { "id": "ffb.normalize-gain", "kind": "toggle", "label": "Normalize effect gain", "level": "advanced", "apply": "next-start",
+          "help": "For wheels that ignore the game's effect gain. Adds Strength." },
+        { "id": "ffb.effects", "kind": "status", "label": "Effects the game uses", "level": "advanced", "text": "None yet." }
+      ],
+      "display": [
+        { "id": "display.screens", "kind": "choice", "label": "Screens", "apply": "next-start",
+          "choices": ["Off", "Center screen", "Wide span", "Triple screens"], "default": "Center screen",
+          "help": "Center screen, a wide span, or angle-correct triple screens." },
+        { "id": "display.panel-width", "kind": "slider", "label": "Panel width", "unit": " mm", "min": 100, "max": 3000, "default": 708,
+          "apply": "next-start", "help": "The visible picture width of one screen." },
+        { "id": "display.panel-height", "kind": "slider", "label": "Panel height", "unit": " mm", "min": 50, "max": 2000, "default": 398,
+          "apply": "next-start", "help": "The visible picture height of one screen." },
+        { "id": "display.eye-distance", "kind": "slider", "label": "Eye distance", "unit": " mm", "min": 100, "max": 3000, "default": 660,
+          "apply": "next-start", "help": "From your eyes to the center screen, level with its edges." },
+        { "id": "display.side-angle", "kind": "slider", "label": "Side screens angle", "unit": "°", "min": 0, "max": 89, "default": 70,
+          "apply": "next-start", "help": "How far the side screens turn toward you (0 = flat)." },
+        { "id": "display.session", "kind": "status", "label": "This session", "text": "Center screen: the game's own display" },
+        { "id": "display.curve", "kind": "slider", "label": "Curve radius", "unit": " mm", "min": 0, "max": 20000, "default": 1500,
+          "level": "advanced", "apply": "next-start", "help": "0 for flat screens; 1500R curved screens are 1500." },
+        { "id": "display.right-angle", "kind": "slider", "label": "Right screen angle", "unit": "°", "min": 0, "max": 89, "default": 70,
+          "level": "advanced", "apply": "next-start", "help": "Only the right screen, after Side screens angle." },
+        { "id": "display.bezel-gap", "kind": "slider", "label": "Bezel gap", "unit": " mm", "min": 0, "max": 100, "default": 8,
+          "level": "advanced", "apply": "next-start", "help": "The gap between the pictures of two screens." },
+        { "id": "display.eye-height", "kind": "slider", "label": "Eye height", "unit": " mm", "min": -1000, "max": 1000, "default": 0,
+          "level": "advanced", "apply": "next-start", "help": "Eyes above the center of the screens." }
+      ],
+      "cameras": [
+        { "id": "cameras.view", "kind": "status", "label": "Current camera", "text": "Not identified: GRID's own FOV" },
+        { "id": "cameras.hint", "kind": "status", "text": "F7 switches Game and Realistic FOV. Numpad + and - zoom, 5 resets." },
+        { "id": "cameras.switch", "kind": "action", "label": "Switch FOV (F7)",
+          "help": "Game FOV is GRID's own zoom; Realistic is seat-true." },
+        { "id": "cameras.fov-offset", "kind": "status", "label": "FOV offset", "level": "advanced", "text": "0.0° from the calculated start" },
+        { "id": "cameras.default-fov", "kind": "action", "label": "Default FOV", "level": "advanced",
+          "help": "Restores only this camera's FOV offset." }
+      ],
+      "telemetry": [
+        { "id": "telemetry.udp", "kind": "status", "label": "Saved game UDP", "text": "Unavailable" },
+        { "id": "telemetry.note", "kind": "status", "text": "GRID sends its own UDP. Change it in GRID's settings, then restart." }
+      ],
+      "help": [
+        { "id": "help.report", "kind": "action", "label": "Report a problem",
+          "help": "Saves a report on your Desktop and opens the mod's page." },
+        { "id": "help.log", "kind": "status", "label": "Log", "text": "not available" }
+      ]
+    }
+  }
+}
