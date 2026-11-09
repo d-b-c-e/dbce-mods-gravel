@@ -22,7 +22,7 @@ $root = $PSScriptRoot
 Import-Module (Join-Path $root 'tools\SetupUx.psm1') -Force
 Import-Module (Join-Path $root 'tools\InstallPackage.psm1') -Force
 Assert-PackageManifest $root
-Import-Module (Join-Path $root 'lib\toolkit\powershell\DbceWheel.psm1') -Force
+Import-Module (Join-Path $root 'lib\vendor-toolkit\DbceWheel.psm1') -Force
 function Say($Message) { Write-Host $Message }
 function Fail($Message) { throw $Message }
 Say 'Gravel wheel mod - install / update'

@@ -28,8 +28,7 @@ collision events are not reconstructed. Table overflow is exposed. These files
 are deliberately ineligible for full FFB replay or Art normalization evidence.
 
 The worker writes the shared `dbce.wheel.session` v1 format using a separately
-pinned native toolkit header. The existing `lib/toolkit/VERSION` stays at its
-old device/packet pin. `lib/session/provenance.json` pins the new headers and
+pinned native toolkit header (vendored into `src/vendor/`). `lib/session/provenance.json` pins the new headers and
 managed reader; it is an unreleased development component, not an FFB DLL bump.
 The synchronous writer runs only on the observation worker. Actual timestamps
 and `sample.interval` expose disk/discovery delays; missed deadlines are skipped.

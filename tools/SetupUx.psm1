@@ -1,6 +1,6 @@
 # Offline-testable presentation and mapping helpers. No device acquisition here.
 Set-StrictMode -Version Latest
-. (Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\toolkit\support\SupportReport.ps1')
+. (Join-Path (Split-Path $PSScriptRoot -Parent) 'lib\vendor-toolkit\SupportReport.ps1')
 
 function Get-SettingsView([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return 'Simple' }

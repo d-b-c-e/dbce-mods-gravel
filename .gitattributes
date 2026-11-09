@@ -1,10 +1,5 @@
 # Preserve the explicitly hashed source-only session pin across checkout hosts.
-lib/toolkit/include/session_writer.h -text
-lib/toolkit/include/muted_effect.h -text
 lib/session/LICENSE -text
 src/vendor/display/*.hpp text eol=lf
 src/vendor/dinput-proxy/*.hpp text eol=lf
 src/vendor/controls/*.hpp text eol=lf
-
-# Shared support vendor bytes are provenance-pinned.
-lib/toolkit/support/* -text

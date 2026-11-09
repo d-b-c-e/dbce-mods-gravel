@@ -3,7 +3,7 @@
   "files": [
     {
       "sha256": "0A4368DCE1A00689FE544F662C7DB3C9AE7CF150254ED82317E5A84FD5916E75",
-      "path": "lib/toolkit/include/muted_effect.h",
+      "path": "src/vendor/dinput-proxy/muted_effect.h",
       "source": "native/dinput-proxy/muted_effect.h"
     },
     {
@@ -13,7 +13,7 @@
     },
     {
       "sha256": "A9DE5D49C55B9B4BE464FB173178D20A97972EACFF500AEE0267E30FB44D19DB",
-      "path": "lib/toolkit/include/session_writer.h",
+      "path": "lib/vendor-toolkit/session_writer.h",
       "source": "native/session/session_writer.h"
     },
     {

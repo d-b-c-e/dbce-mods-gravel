@@ -48,11 +48,11 @@ try {
     Assert (-not (Test-KnownLegacyProxy ('a'*64))) 'Unknown legacy identity accepted.'
     # Golden layout players and install receipts rely on: binaries stay under dist\ in the ZIP and in DBCE-Wheel-Setup.
     $setupLayout = @('WheelSetup.ps1','WheelSetup.bat','Uninstall.ps1','Uninstall.bat','tools\SetupUx.psm1','tools\InstallPackage.psm1',
-        'lib\toolkit\support\SupportReport.ps1','lib\toolkit\support\SupportReport.cs','lib\toolkit\support\LICENSE',
-        'lib\toolkit\support\PROVENANCE.json','lib\toolkit\powershell\DbceWheel.psm1','dist\wheelprobe.exe','VERSION','QUICKSTART.md',
+        'lib\vendor-toolkit\DbceWheel.psm1','lib\vendor-toolkit\SupportReport.ps1',
+        'lib\vendor-toolkit\SupportReport.cs','dist\wheelprobe.exe','VERSION','QUICKSTART.md',
         'docs\troubleshooting.md','docs\forza-format.md')
     $packageLayout = $setupLayout + @('Install.ps1','Install.bat','README.md','LICENSE','dist\dinput8.dll','games\gravel\milestone_mod.ini',
-        'lib\toolkit\VERSION','docs\directinput-sixdof.md','docs\UX-OVERNIGHT-2026-09-16.md')
+        'docs\directinput-sixdof.md')
     Assert (@(Compare-Object -CaseSensitive -SyncWindow 0 @(Get-SetupPackageFiles) $setupLayout).Count -eq 0) 'Installed setup layout changed.'
     Assert (@(Compare-Object -CaseSensitive @(Get-PackageFiles) $packageLayout).Count -eq 0 -and @(Get-PackageFiles).Count -eq $packageLayout.Count) 'Package layout changed.'
     Assert-PackageManifest $PackageRoot
@@ -235,11 +235,11 @@ try {
     [IO.Directory]::Delete($setupJunction,$false)
     # Hardware discovery is replaced only in this disposable package, with its
     # manifest updated. Plans must pass or fail without calling the sentinel.
-    $toolkitPath=Join-Path $PackageRoot 'lib\toolkit\powershell\DbceWheel.psm1'
+    $toolkitPath=Join-Path $PackageRoot 'lib\vendor-toolkit\DbceWheel.psm1'
     $toolkitBytes=[IO.File]::ReadAllBytes($toolkitPath)
     [IO.File]::WriteAllText($toolkitPath,"function Get-DirectInputDevices { throw 'forbidden fixture hardware enumeration' }`nfunction Get-SteamLibraries { @() }`nExport-ModuleMember -Function Get-DirectInputDevices,Get-SteamLibraries`n")
     $guardManifest=$manifestText | ConvertFrom-Json
-    ($guardManifest.Files | Where-Object Path -CEQ 'lib/toolkit/powershell/DbceWheel.psm1').SHA256=Get-ByteHash ([IO.File]::ReadAllBytes($toolkitPath))
+    ($guardManifest.Files | Where-Object Path -CEQ 'lib/vendor-toolkit/DbceWheel.psm1').SHA256=Get-ByteHash ([IO.File]::ReadAllBytes($toolkitPath))
     [IO.File]::WriteAllText($manifestPath,($guardManifest | ConvertTo-Json -Depth 6))
     foreach ($mode in 'Check','DryRun','WhatIf') {
         $before=Snapshot $gameRoot; $packageBefore=Snapshot $PackageRoot
@@ -428,8 +428,8 @@ try {
     Assert (@(Get-ChildItem -LiteralPath $other).Count -eq 0) 'Unsupported game folder was modified.'
     $incomplete = Join-Path $fixture 'incomplete-package'
     [IO.Directory]::CreateDirectory((Join-Path $incomplete 'tools')) | Out-Null
-    [IO.Directory]::CreateDirectory((Join-Path $incomplete 'lib\toolkit\powershell')) | Out-Null
-    foreach ($relative in 'Install.ps1','tools\SetupUx.psm1','tools\InstallPackage.psm1','lib\toolkit\powershell\DbceWheel.psm1') {
+    [IO.Directory]::CreateDirectory((Join-Path $incomplete 'lib\vendor-toolkit')) | Out-Null
+    foreach ($relative in 'Install.ps1','tools\SetupUx.psm1','tools\InstallPackage.psm1','lib\vendor-toolkit\DbceWheel.psm1') {
         Copy-Item -LiteralPath (Join-Path $PackageRoot $relative) -Destination (Join-Path $incomplete $relative)
     }
     Reject { & (Join-Path $incomplete 'Install.ps1') -GamePath $game } 'An incomplete package was installed.'

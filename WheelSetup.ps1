@@ -83,9 +83,9 @@ if (-not (Test-Path $probe)) {
 
 # ---------------------------------------------------------------- the game
 # Steam discovery and DirectInput enumeration come from dbce-wheel-mod-toolkit's
-# PowerShell module, vendored under lib\toolkit (the toolkit's tools\Sync-Toolkit.ps1).
-$toolkit = Join-Path $root 'lib\toolkit\powershell\DbceWheel.psm1'
-if (-not (Test-Path $toolkit)) { Die "lib\toolkit is missing - re-download the release" }
+# PowerShell module, vendored alongside native headers.
+$toolkit = Join-Path $root 'lib\vendor-toolkit\DbceWheel.psm1'
+if (-not (Test-Path $toolkit)) { Die "lib\vendor-toolkit is missing or incomplete; copy from the toolkit" }
 Import-Module $toolkit -Force
 
 Say "Wheel settings - Milestone" 'White'

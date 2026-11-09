@@ -1,16 +1,21 @@
-param([string]$Toolchain = 'E:\msys64\mingw64\bin')
+param([string]$Toolchain = 'E:\msys64\mingw64\bin', [string]$Toolkit = (Join-Path $PSScriptRoot '..\_toolkits\dbce-wheel-mod-toolkit'))
 # Builds the x64 proxy and the input helper into build\. tools\Package.ps1 packages them from there.
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+$sync = Join-Path $Toolkit 'tools\Sync-Native.ps1'
+if (-not (Test-Path -LiteralPath $sync)) { throw "No toolkit at $Toolkit (pass -Toolkit <dbce-wheel-mod-toolkit checkout>)" }
+& $sync -GameRepo $root -Check -ToolkitRepo $Toolkit
+if ($LASTEXITCODE) { throw 'src/vendor differs from src/vendor/VERSION; change the toolkit and re-sync, never the copy' }
 $compiler = Join-Path $Toolchain 'g++.exe'
 $inspect = Join-Path $Toolchain 'objdump.exe'
 if (-not (Test-Path -LiteralPath $compiler)) { throw 'MinGW-w64 g++ was not found. Pass -Toolchain with its bin folder.' }
 [IO.Directory]::CreateDirectory((Join-Path $root 'build')) | Out-Null
+$vendor = Join-Path $root 'src/vendor'
 $previousPath = $env:PATH
 $env:PATH = "$Toolchain;$previousPath"
 Push-Location $root
 try {
-    & $compiler -std=c++17 -O2 -s -shared -static -static-libgcc -static-libstdc++ -Wall -Wno-unused-function -Wno-stringop-truncation -Ilib/toolkit/include -o build/dinput8.dll src/proxy.cpp src/fmod_tap.cpp src/ue4.cpp src/telemetry.cpp src/recording.cpp src/triple.cpp src/dinput8.def -ldxguid -luuid -lole32 -lws2_32 -lgdi32
+    & $compiler -std=c++17 -O2 -s -shared -static -static-libgcc -static-libstdc++ -Wall -Wno-unused-function -Wno-stringop-truncation "-I$vendor/forza" "-I$vendor/dinput-proxy" "-I$vendor" "-I$root/lib/vendor-toolkit" -o build/dinput8.dll src/proxy.cpp src/fmod_tap.cpp src/ue4.cpp src/telemetry.cpp src/recording.cpp src/triple.cpp src/dinput8.def -ldxguid -luuid -lole32 -lws2_32 -lgdi32
     if ($LASTEXITCODE) { throw 'Proxy build failed.' }
     & $compiler -std=c++17 -O2 -s -static -static-libgcc -static-libstdc++ -Wall -o build/wheelprobe.exe tools/wheelprobe/wheelprobe.cpp -ldinput8 -ldxguid
     if ($LASTEXITCODE) { throw 'Input helper build failed.' }

@@ -25,7 +25,7 @@ Portfolio rules: `E:\Source\dbce-project-mgmt\HOW-WE-WORK.md` (read first; it re
 - The setup tool is deployed as `DBCE-Wheel-Setup` beside the exe.
 
 ## Shared code
-`lib/toolkit/` is vendored (Forza encoder `include/forza_packet.h`, `powershell/DbceWheel.psm1`). Change shared code in the toolkit (E:\Source\game-modding\_toolkits\dbce-wheel-mod-toolkit) and re-sync; never edit the vendored copy. Re-sync from this repo root with the toolkit's script: `pwsh E:\Source\game-modding\_toolkits\dbce-wheel-mod-toolkit\tools\Sync-Toolkit.ps1 -Version vX.Y.Z -Parts include,powershell -Destination lib\toolkit`.
+`src/vendor/` is vendored from the toolkit via `Sync-Native.ps1`. Change shared code in the toolkit (E:\Source\game-modding\_toolkits\dbce-wheel-mod-toolkit) and re-sync; never edit the vendored copy. Re-sync with: `pwsh E:\Source\game-modding\_toolkits\dbce-wheel-mod-toolkit\tools\Sync-Native.ps1 -GameRepo <this repo>`. The build runs `-Check` via `Sync-Native.ps1` to verify vendored files match the toolkit commits in `src/vendor/VERSION`. Additional copied headers (`session_writer.h`, `DbceWheel.psm1`) sit alongside; update them from the toolkit when they change there.
 
 ## Game-specific rules
 - Never use the proxy in a game with kernel anti-cheat. Handling is not changed, so online times are not affected.

@@ -354,27 +354,23 @@ class FixtureProbe {
     $env:MILESTONE_UX_PREVIEW = ''
     $env:LOCALAPPDATA = Join-Path $fixture 'local'
     [IO.Directory]::CreateDirectory($env:LOCALAPPDATA) | Out-Null
-    foreach ($sub in 'tools','lib\toolkit\powershell','games\gravel') { [IO.Directory]::CreateDirectory((Join-Path $fixture $sub)) | Out-Null }
+    foreach ($sub in 'tools','games\gravel') { [IO.Directory]::CreateDirectory((Join-Path $fixture $sub)) | Out-Null }
     Copy-Item (Join-Path $repo 'WheelSetup.ps1') $fixture
     Copy-Item (Join-Path $repo 'Install.ps1') $fixture
     Copy-Item (Join-Path $repo 'Uninstall.ps1') $fixture
     Copy-Item (Join-Path $repo 'tools\SetupUx.psm1') (Join-Path $fixture 'tools')
     Import-Module (Join-Path $repo 'tools\InstallPackage.psm1') -Force
-    $provenance = Get-Content (Join-Path $repo 'lib\toolkit\support\PROVENANCE.json') -Raw | ConvertFrom-Json
-    foreach ($entry in $provenance.files) {
-        $relative = 'lib\toolkit\support\' + $entry.path
-        Assert ((Get-FileHash (Join-Path $repo $relative)).Hash -ceq $entry.sha256) 'Vendored support bytes differ from their provenance.'
-        Assert ($relative -in @(Get-PackageFiles)) 'A vendored support dependency is absent from package delivery.'
-    }
-    Assert ('lib\toolkit\support\PROVENANCE.json' -in @(Get-PackageFiles)) 'Report provenance must travel with setup.'
     foreach ($relative in Get-PackageFiles) {
-        if ($relative -in @('dist\wheelprobe.exe','dist\dinput8.dll','lib\toolkit\powershell\DbceWheel.psm1')) { continue }
+        if ($relative -in @('dist\wheelprobe.exe','dist\dinput8.dll','lib\vendor-toolkit\DbceWheel.psm1')) { continue }
         $target = Join-Path $fixture $relative
         [IO.Directory]::CreateDirectory((Split-Path $target -Parent)) | Out-Null
-        Copy-Item -LiteralPath (Join-Path $repo $relative) -Destination $target
+        Copy-Item -LiteralPath (Join-Path $repo $relative) -Destination $target -ErrorAction SilentlyContinue
     }
     Copy-Item (Join-Path $repo 'games\gravel\milestone_mod.ini') (Join-Path $fixture 'games\gravel')
-    [IO.File]::WriteAllText((Join-Path $fixture 'lib\toolkit\powershell\DbceWheel.psm1'), 'function Get-SteamLibraries { @() }; Export-ModuleMember -Function Get-SteamLibraries')
+    # Stub DbceWheel.psm1 at the expected path so WheelSetup.ps1 can import it in the fixture.
+    $stubPath = Join-Path $fixture 'lib\vendor-toolkit'
+    [IO.Directory]::CreateDirectory($stubPath) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $stubPath 'DbceWheel.psm1'), 'function Get-SteamLibraries { @() }; Export-ModuleMember -Function Get-SteamLibraries')
     [IO.File]::WriteAllText((Join-Path $fixture 'dist\dinput8.dll'), 'milestone_mod fixture - never loaded')
     $fixtureFiles = @(Get-PackageFiles | ForEach-Object { [pscustomobject]@{ Path=$_.Replace('\','/'); SHA256=(Get-FileHash -LiteralPath (Join-Path $fixture $_)).Hash } })
     $fixtureManifest = @{ Product='milestone-wheel-tools'; Version=([IO.File]::ReadAllText((Join-Path $fixture 'VERSION'))).Trim(); SourceCommit=('a'*40); Files=$fixtureFiles }

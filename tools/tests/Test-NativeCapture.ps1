@@ -5,26 +5,28 @@ $pin = Get-Content -LiteralPath (Join-Path $root 'lib/session/provenance.json') 
 foreach($file in $pin.files) {
     if ((Get-FileHash -LiteralPath (Join-Path $root $file.path)).Hash -ine $file.sha256) { throw "Session pin changed: $($file.path)" }
 }
+$vendor = Join-Path $root 'src/vendor'
+$include = @("-I$vendor/forza", "-I$vendor/dinput-proxy", "-I$vendor", "-I$root/lib/vendor-toolkit")
 $out = Join-Path $root 'build/native-capture-tests'
 [IO.Directory]::CreateDirectory($out) | Out-Null
-& $Compiler -std=c++17 -Wall -Wno-unused-function -static ('-I'+(Join-Path $root 'lib/toolkit/include')) -o (Join-Path $out 'capture.exe') (Join-Path $PSScriptRoot 'NativeCapture.cpp') -ldxguid -luuid -lole32
+& $Compiler -std=c++17 -Wall -Wno-unused-function -static @include -o (Join-Path $out 'capture.exe') (Join-Path $PSScriptRoot 'NativeCapture.cpp') -ldxguid -luuid -lole32
 if ($LASTEXITCODE) { throw 'Capture fake-COM build failed.' }
 & (Join-Path $out 'capture.exe')
 if ($LASTEXITCODE) { throw 'Capture fake-COM checks failed.' }
-& $Compiler -std=c++17 -Wall -Wno-unused-function -static ('-I'+(Join-Path $root 'lib/toolkit/include')) -o (Join-Path $out 'abi.exe') (Join-Path $PSScriptRoot 'NativeAbi.cpp') -ldxguid -luuid -lole32
+& $Compiler -std=c++17 -Wall -Wno-unused-function -static @include -o (Join-Path $out 'abi.exe') (Join-Path $PSScriptRoot 'NativeAbi.cpp') -ldxguid -luuid -lole32
 if ($LASTEXITCODE) { throw 'SDK ABI fixture build failed.' }
 & (Join-Path $out 'abi.exe')
 if ($LASTEXITCODE) { throw 'SDK ABI checks failed.' }
-& $Compiler -std=c++17 -DABI_ANSI -Wall -Wno-unused-function -static ('-I'+(Join-Path $root 'lib/toolkit/include')) -o (Join-Path $out 'abi-ansi.exe') (Join-Path $PSScriptRoot 'NativeAbi.cpp') -ldxguid -luuid -lole32
+& $Compiler -std=c++17 -DABI_ANSI -Wall -Wno-unused-function -static @include -o (Join-Path $out 'abi-ansi.exe') (Join-Path $PSScriptRoot 'NativeAbi.cpp') -ldxguid -luuid -lole32
 if ($LASTEXITCODE) { throw 'ANSI SDK ABI fixture build failed.' }
 & (Join-Path $out 'abi-ansi.exe')
 if ($LASTEXITCODE) { throw 'ANSI SDK ABI checks failed.' }
 # The STD-033 fence over the proxy's own hooks (sana 107988); c_dfDIJoystick2 comes from libdinput8.
-& $Compiler -std=c++17 -Wall -Wno-unused-function -Wno-unknown-pragmas -static ('-I'+(Join-Path $root 'lib/toolkit/include')) -o (Join-Path $out 'fence.exe') (Join-Path $PSScriptRoot 'NativeFence.cpp') -ldinput8 -ldxguid -luuid -lole32
+& $Compiler -std=c++17 -Wall -Wno-unused-function -Wno-unknown-pragmas -static @include -o (Join-Path $out 'fence.exe') (Join-Path $PSScriptRoot 'NativeFence.cpp') -ldinput8 -ldxguid -luuid -lole32
 if ($LASTEXITCODE) { throw 'Fence fixture build failed.' }
 & (Join-Path $out 'fence.exe')
 if ($LASTEXITCODE) { throw 'Fence fixture checks failed.' }
-& $Compiler -std=c++17 -Wall -Wno-unused-function -static ('-I'+(Join-Path $root 'lib/toolkit/include')) -o (Join-Path $out 'recording.exe') (Join-Path $PSScriptRoot 'NativeRecording.cpp')
+& $Compiler -std=c++17 -Wall -Wno-unused-function -static @include -o (Join-Path $out 'recording.exe') (Join-Path $PSScriptRoot 'NativeRecording.cpp')
 if ($LASTEXITCODE) { throw 'Native recording fixture build failed.' }
 $result = Join-Path ([IO.Path]::GetTempPath()) ('gravel-recording-fixture-'+[guid]::NewGuid().ToString('N'))
 foreach($mode in 'none','expired','valid') {

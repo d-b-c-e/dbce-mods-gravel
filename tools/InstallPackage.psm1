@@ -195,8 +195,8 @@ function Invoke-PackageRemoval {
 
 function Get-SetupPackageFiles {
     @('WheelSetup.ps1','WheelSetup.bat','Uninstall.ps1','Uninstall.bat','tools\SetupUx.psm1',
-      'tools\InstallPackage.psm1','lib\toolkit\support\SupportReport.ps1','lib\toolkit\support\SupportReport.cs',
-      'lib\toolkit\support\LICENSE','lib\toolkit\support\PROVENANCE.json','lib\toolkit\powershell\DbceWheel.psm1','dist\wheelprobe.exe','VERSION','QUICKSTART.md',
+      'tools\InstallPackage.psm1','lib\vendor-toolkit\DbceWheel.psm1','lib\vendor-toolkit\SupportReport.ps1',
+      'lib\vendor-toolkit\SupportReport.cs','dist\wheelprobe.exe','VERSION','QUICKSTART.md',
       'docs\troubleshooting.md','docs\forza-format.md')
 }
 
@@ -260,8 +260,8 @@ function Get-InstallOwnership([string]$GamePath, [string]$GameRoot) {
 }
 
 function Get-PackageFiles {
-    @('Install.ps1','Install.bat','README.md','LICENSE','dist\dinput8.dll','games\gravel\milestone_mod.ini','lib\toolkit\VERSION',
-      'docs\directinput-sixdof.md','docs\UX-OVERNIGHT-2026-09-16.md') + @(Get-SetupPackageFiles) | Sort-Object -Unique
+    @('Install.ps1','Install.bat','README.md','LICENSE','dist\dinput8.dll','games\gravel\milestone_mod.ini',
+      'docs\directinput-sixdof.md') + @(Get-SetupPackageFiles) | Sort-Object -Unique
 }
 
 function Assert-PackageManifest([string]$Root) {

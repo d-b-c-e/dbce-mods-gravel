@@ -20,7 +20,7 @@ silently — no error, no data, just nothing. Measured against SimHub's
 | 331        | accepted but immediately `Paused=True` |
 
 Horizon is `232 sled + 12 pad + 79 dash + 1 trailing byte = 324`. Since the
-toolkit encoder took over (`lib/toolkit/include/forza_packet.h`) that trailing
+toolkit encoder took over (vendored as `src/vendor/forza/forza_packet.h`) that trailing
 byte carries `'R'` (0x52) rather than zero: no Forza title reads it, and a
 sentinel lets `forza_probe.py` say whose packets it is looking at when several
 senders share a port. Emitting 323

@@ -325,11 +325,11 @@ Built binaries are not committed; they go to `build/`.
 `tools\Invoke-SourceValidation.ps1 -Engine pwsh` (or `-Engine powershell`) runs both test suites;
 the hosted source check runs the same thing, only by explicit `workflow_dispatch`.
 
-A 32-bit game needs a 32-bit build. The Forza encoder and the installer's
-Steam/DirectInput helpers are vendored from
-[dbce-wheel-mod-toolkit](https://github.com/d-b-c-e/dbce-wheel-mod-toolkit)
-under `lib/toolkit` (pinned in `lib/toolkit/VERSION`); bump with the toolkit's
-`tools\Sync-Toolkit.ps1 -Version vX.Y.Z -Parts include,powershell -Destination lib\toolkit`.
+The Forza encoder, native helper headers and the installer's Steam/DirectInput helpers
+are vendored from [dbce-wheel-mod-toolkit](https://github.com/d-b-c-e/dbce-wheel-mod-toolkit)
+under `src/vendor/` (pinned in `src/vendor/VERSION`) via the toolkit's
+`tools\Sync-Native.ps1 -GameRepo <this repo>`. The build verifies the vendored files
+match via `Sync-Native.ps1 -Check`.
 
 ## Tools
 

@@ -10,7 +10,7 @@ if (-not $GamePath) {
     $beside = Split-Path $PSScriptRoot -Parent
     if (Test-Path -LiteralPath (Join-Path $beside 'gravel-Win64-Shipping.exe')) { $GamePath = $beside }
     else {
-        Import-Module (Join-Path $PSScriptRoot 'lib\toolkit\powershell\DbceWheel.psm1') -Force
+        Import-Module (Join-Path $PSScriptRoot 'lib\vendor-toolkit\DbceWheel.psm1') -Force
         $hits = @(foreach ($library in Get-SteamLibraries) {
             $candidate = Join-Path $library 'steamapps\common\Gravel\gravel\Binaries\Win64'
             if (Test-Path -LiteralPath (Join-Path $candidate 'milestone_mod.ini')) { $candidate }
