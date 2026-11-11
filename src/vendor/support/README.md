@@ -82,6 +82,12 @@ Qualified successor `support_report.cpp` SHA-256 (normal checkout bytes):
 `64630BEE1C01117800B939E0FBDD3E7750B8BBBBA4AD728774D972D5E9A4D0D6`;
 Git blob `4e881d73f49f4e8e73f3fe82552adc8a1f2cb740`. The header is unchanged.
 
+## Help page for native games
+
+`support_report_page.hpp/.cpp` is the F6 Help "Submit issue" page (`dbce::support::DrawSupportReportPage`). It needs
+Dear ImGui and `native/panel/dbce_panel.h`, so it is not part of the CMake library above; a game compiles it beside
+`support_report.cpp`. `native/panel/build_test.ps1` compile-checks it.
+
 ## Focused qualification
 
 `test_support_report.cpp` ports the existing inputs/assertions from

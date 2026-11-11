@@ -134,6 +134,20 @@ inline bool covers(const Layout& l, const SourceView* sources, int count, int gr
     return true;
 }
 
+// covers() on the four edges of each panel only. Each view holds a convex cone of rays from the eye, and views sit side
+// by side about the vertical axis, so a point no view reaches always comes with an unreached point on a panel edge:
+// a gap between views runs top to bottom, and the highest and lowest rays are on the top and bottom edges. plan_views
+// searches with this and confirms its answer on the full lattice.
+inline bool covers_edges(const Layout& l, const SourceView* sources, int count, int grid = 48) noexcept {
+    for (int p=0;p<3;++p) for (int i=0;i<=grid;++i) {
+        const double t=(double)i/grid;
+        for (const auto& uv : {std::array<double,2>{t,0.0},std::array<double,2>{t,1.0},std::array<double,2>{0.0,t},std::array<double,2>{1.0,t}}) {
+            Sample s{};
+            if (sample(l,sources,count,p,uv[0],uv[1],s)!=Error::none||!s.covered) return false;
+        }
+    }
+    return true;
+}
 // Views for a game that can render `count` (2 or 3) equal views side by side in one texture, each region_aspect
 // (width/height) in shape: yaws -y,+y (or -y,0,+y) and one horizontal FOV, chosen as the smallest FOV that covers
 // every panel, so the game spends its pixels where the panels are. margin_degrees widens the result for safety.
@@ -151,9 +165,9 @@ inline Error plan_views(const Layout& l, int count, double region_aspect, double
     double best_yaw=0, best_fov=0;
     SourceView v[3]{};
     auto fit=[&](double yaw) {   // smallest covering FOV at this yaw, 0 if none
-        if (!views(yaw,179,v)||!covers(l,v,count,48)) return 0.0;
+        if (!views(yaw,179,v)||!covers_edges(l,v,count,48)) return 0.0;
         double lo=1, hi=179;
-        while (hi-lo>0.01) { const double mid=(lo+hi)/2; if (views(yaw,mid,v)&&covers(l,v,count,48)) hi=mid; else lo=mid; }
+        while (hi-lo>0.01) { const double mid=(lo+hi)/2; if (views(yaw,mid,v)&&covers_edges(l,v,count,48)) hi=mid; else lo=mid; }
         return hi;
     };
     auto consider=[&](double yaw) { const double f=fit(yaw); if (f>0&&(best_fov==0||f<best_fov)) best_fov=f, best_yaw=yaw; };
