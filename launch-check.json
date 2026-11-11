@@ -1,0 +1,42 @@
+{
+  "steamAppId": 558260,
+  "process": "gravel-Win64-Shipping",
+  "gameDir": "D:\\Program Files (x86)\\Steam\\steamapps\\common\\Gravel",
+  "log": "%GAME%\\gravel\\Binaries\\Win64\\milestone_mod.log",
+  "protect": [
+    "%GAME%\\gravel\\Binaries\\Win64\\milestone_mod.ini",
+    "%GAME%\\gravel\\Config\\WindowsNoEditor",
+    "%LOCALAPPDATA%\\Gravel\\Saved\\Config",
+    "%LOCALAPPDATA%\\Gravel\\Saved\\SaveGames",
+    "%STEAMUSER%\\558260"
+  ],
+  "registry": [],
+  "switches": [
+    "%LOCALAPPDATA%\\dbce\\gravel\\ffb-fence.on"
+  ],
+  "foreground": true,
+  "steps": [
+    {
+      "until": "\\[proxy\\] real dinput8=",
+      "timeout": 240
+    },
+    {
+      "wait": 20
+    },
+    {
+      "capture": "menu",
+      "menu": true,
+      "screens": 3,
+      "info": true
+    }
+  ],
+  "expect": [
+    "\\[proxy\\] real dinput8=",
+    "\\[proxy\\] force feedback FENCED \\(ffb-fence\\.on\\)"
+  ],
+  "forbid": [
+    "so DirectInput is refused",
+    "DllGetClassObject refused"
+  ],
+  "notes": "AGENTS.md says the exact save and config folders are 'unknown'; the Config, Saved\\Config and SaveGames paths come from docs/wheelconfig.md, docs/TRIPLES.md and docs/sweep-2026-11.md and all exist on disk. The log only exists when log=1 in milestone_mod.ini (it is 1 now) and has no version in its start line; the game ignores WM_CLOSE, so the tool will end it by exact PID. Public repo."
+}
